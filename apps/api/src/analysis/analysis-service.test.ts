@@ -6,7 +6,11 @@ describe("analysis service", () => {
     const dependencies = {
       videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1" }) },
       usage: { reserveAnalysis: vi.fn().mockResolvedValue("reserved"), releaseAnalysis: vi.fn() },
-      runs: { create: vi.fn().mockImplementation(async (input: { id: string }) => ({ id: input.id, status: "queued" })) },
+      runs: {
+        create: vi.fn().mockImplementation(async (input: { id: string }) => ({ id: input.id, status: "queued" })),
+        findOwnedById: vi.fn(),
+        requestCancellation: vi.fn()
+      },
       queue: { add: vi.fn().mockResolvedValue(undefined) }
     };
     const service = createAnalysisService(dependencies);
@@ -23,7 +27,7 @@ describe("analysis service", () => {
     const dependencies = {
       videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1" }) },
       usage: { reserveAnalysis: vi.fn().mockResolvedValue("exhausted"), releaseAnalysis: vi.fn() },
-      runs: { create: vi.fn() },
+      runs: { create: vi.fn(), findOwnedById: vi.fn(), requestCancellation: vi.fn() },
       queue: { add: vi.fn() }
     };
 

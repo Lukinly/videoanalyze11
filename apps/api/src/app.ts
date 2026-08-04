@@ -3,13 +3,13 @@ import cookie from "@fastify/cookie";
 import { DomainError } from "@videoanalyze/domain";
 import { registerAuthRoutes, type AuthServiceContract } from "./routes/auth.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
-import { registerAnalysisRoutes } from "./routes/analysis.js";
+import { registerAnalysisRoutes, type AnalysisServiceContract } from "./routes/analysis.js";
 import { createProgressHub } from "./events/progress-hub.js";
 
 export function buildApp(dependencies: {
   authService: AuthServiceContract;
   uploadService?: { start(input: { userId: string; fileName: string; contentType: string; contentLength: number }): Promise<unknown> };
-  analysisService?: { start(input: { userId: string; videoId: string }): Promise<unknown>; get(input: { userId: string; runId: string }): Promise<unknown>; cancel(input: { userId: string; runId: string }): Promise<unknown> };
+  analysisService?: AnalysisServiceContract;
   progressHub?: ReturnType<typeof createProgressHub>;
 }): FastifyInstance {
   const app = Fastify({ logger: false });

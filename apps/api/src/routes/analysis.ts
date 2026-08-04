@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { AuthServiceContract } from "./auth.js";
 import type { ProgressEvent } from "../events/progress-hub.js";
 
-type AnalysisServiceContract = {
+export type AnalysisServiceContract = {
   start(input: { userId: string; videoId: string }): Promise<unknown>;
   get(input: { userId: string; runId: string }): Promise<unknown & { id?: string }>;
   cancel(input: { userId: string; runId: string }): Promise<unknown>;

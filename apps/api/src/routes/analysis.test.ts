@@ -10,7 +10,7 @@ describe("analysis routes", () => {
     cancel: vi.fn().mockResolvedValue({ id: "run_1", status: "cancelling" }),
     get: vi.fn().mockResolvedValue({ id: "run_1", status: "completed", stage: "completed", progress: 1 })
   };
-  let app: { inject: Function; close: () => Promise<void> };
+  let app: { inject: (options: { method: string; url: string; headers?: Record<string, string>; payload?: unknown }) => Promise<{ statusCode: number; headers: Record<string, string | string[] | undefined>; body: string; json: () => unknown }>; close: () => Promise<void> };
 
   beforeAll(async () => {
     const { buildApp } = await import("../app.js");

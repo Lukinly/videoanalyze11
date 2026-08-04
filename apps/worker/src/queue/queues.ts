@@ -8,6 +8,6 @@ export type AnalysisJob = {
   runId: string;
 };
 
-export function createAnalysisQueue(connection: ConstructorParameters<typeof Queue>[1]["connection"]) {
+export function createAnalysisQueue(connection: NonNullable<ConstructorParameters<typeof Queue>[1]>["connection"]) {
   return new Queue<AnalysisJob>(ANALYSIS_QUEUE, { connection });
 }

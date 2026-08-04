@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { newDb } from "pg-mem";
+import type { createRepositories } from "../db/repositories/index.js";
 
 const memoryDb = newDb({ autoCreateForeignKeyIndices: true });
 const { Pool } = memoryDb.adapters.createPg();
@@ -51,11 +52,8 @@ describe("authentication service", () => {
 });
 
 async function loadAuthModules() {
-  const [{ createRepositories }, { createAuthService }] = await Promise.all([
-    import("../db/repositories/index.js"),
-    import("./auth-service.js")
-  ]);
-  return { createRepositories, createAuthService };
+  const { createAuthService } = await import("./auth-service.js");
+  return { createAuthService };
 }
 
-const { createRepositories, createAuthService } = await loadAuthModules();
+const { createAuthService } = await loadAuthModules();

@@ -8,7 +8,7 @@ describe("auth routes", () => {
     authenticate: vi.fn().mockResolvedValue({ id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() }),
     logout: vi.fn().mockResolvedValue(undefined)
   };
-  let app: { inject: Function; close: () => Promise<void> };
+  let app: { inject: (options: { method: string; url: string; headers?: Record<string, string>; payload?: unknown }) => Promise<{ statusCode: number; headers: Record<string, string | string[] | undefined>; body: string; json: () => unknown }>; close: () => Promise<void> };
 
   beforeAll(async () => {
     const { buildApp } = await import("../app.js");

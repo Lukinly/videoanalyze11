@@ -1,4 +1,5 @@
-export function createOriginalVideoKey(userId: string, videoId: string, _fileName: string): string {
+export function createOriginalVideoKey(userId: string, videoId: string, fileName: string): string {
+  void fileName;
   return `users/${encodePathPart(userId)}/videos/${encodePathPart(videoId)}/original`;
 }
 

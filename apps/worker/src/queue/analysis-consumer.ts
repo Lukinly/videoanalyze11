@@ -3,7 +3,7 @@ import type { AnalysisJob } from "./queues.js";
 import { ANALYSIS_QUEUE } from "./queues.js";
 
 export function createAnalysisConsumer(input: {
-  connection: ConstructorParameters<typeof Worker>[2]["connection"];
+  connection: NonNullable<ConstructorParameters<typeof Worker>[2]>["connection"];
   runner: { run(job: AnalysisJob & { signal: AbortSignal }): Promise<void> };
   concurrency?: number;
 }) {

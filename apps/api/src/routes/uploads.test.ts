@@ -8,7 +8,7 @@ describe("upload routes", () => {
   const uploadService = {
     start: vi.fn().mockResolvedValue({ videoId: "video_1", objectKey: "users/user_1/videos/video_1/original", uploadUrl: "https://signed", expiresAt: "2026-08-04T00:00:00.000Z" })
   };
-  let app: { inject: Function; close: () => Promise<void> };
+  let app: { inject: (options: { method: string; url: string; headers?: Record<string, string>; payload?: unknown }) => Promise<{ statusCode: number; headers: Record<string, string | string[] | undefined>; body: string; json: () => unknown }>; close: () => Promise<void> };
 
   beforeAll(async () => {
     const { buildApp } = await import("../app.js");

@@ -9,8 +9,8 @@ type AnalysisRepositories = {
   };
   runs: {
     create(input: { id: string; userId: string; videoId: string }): Promise<{ id: string; status: string }>;
-    findOwnedById(userId: string, runId: string): Promise<unknown | null>;
-    requestCancellation(userId: string, runId: string): Promise<unknown | null>;
+    findOwnedById(userId: string, runId: string): Promise<{ id: string } | null>;
+    requestCancellation(userId: string, runId: string): Promise<{ id: string } | null>;
   };
 };
 
@@ -33,12 +33,12 @@ export function createAnalysisService(dependencies: AnalysisRepositories & { que
         throw error;
       }
     },
-    async get(input: { userId: string; runId: string }) {
+    async get(input: { userId: string; runId: string }): Promise<{ id: string }> {
       const run = await dependencies.runs.findOwnedById(input.userId, input.runId);
       if (!run) throw new DomainError("NOT_FOUND", "analysis run not found", 404);
       return run;
     },
-    async cancel(input: { userId: string; runId: string }) {
+    async cancel(input: { userId: string; runId: string }): Promise<{ id: string }> {
       const run = await dependencies.runs.requestCancellation(input.userId, input.runId);
       if (!run) throw new DomainError("NOT_FOUND", "analysis run not found", 404);
       return run;

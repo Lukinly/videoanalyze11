@@ -10,7 +10,7 @@ type UploadVideoRepository = {
 
 export function createUploadService(dependencies: {
   videos: UploadVideoRepository;
-  storage: ObjectStorage;
+  storage: Pick<ObjectStorage, "createUpload">;
   maxBytes: number;
   maxDurationSeconds: number;
 }) {

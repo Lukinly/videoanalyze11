@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { newDb } from "pg-mem";
+import type { createRepositories } from "./repositories/index.js";
 
 const memoryDb = newDb({ autoCreateForeignKeyIndices: true });
 const { Pool } = memoryDb.adapters.createPg();
