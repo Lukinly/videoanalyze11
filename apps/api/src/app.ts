@@ -24,6 +24,12 @@ export function buildApp(dependencies: {
   const app = Fastify({ logger: false });
 
   app.register(cookie);
+  app.addHook("onSend", async (_request, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; form-action 'self'");
+  });
   app.register(async (instance) => registerHealthRoutes(instance, dependencies.readinessChecks));
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {

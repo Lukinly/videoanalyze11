@@ -83,6 +83,9 @@ importers:
       bcryptjs:
         specifier: ^3.0.0
         version: 3.0.3
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.81.3(supports-color@7.2.0)
       drizzle-orm:
         specifier: ^0.38.0
         version: 0.38.4(@types/pg@8.20.3)(@types/react@19.2.18)(pg@8.22.0)(postgres@3.4.9)(react@19.2.8)
