@@ -1,0 +1,59 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+describe("auth routes", () => {
+  const authService = {
+    register: vi.fn().mockResolvedValue({ userId: "user_1", verificationSent: true }),
+    verifyEmail: vi.fn().mockResolvedValue({ userId: "user_1", trialCreditsGranted: true }),
+    login: vi.fn().mockResolvedValue({ sessionToken: "session-token", user: { id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() } }),
+    authenticate: vi.fn().mockResolvedValue({ id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() }),
+    logout: vi.fn().mockResolvedValue(undefined)
+  };
+  let app: { inject: Function; close: () => Promise<void> };
+
+  beforeAll(async () => {
+    const { buildApp } = await import("../app.js");
+    app = buildApp({ authService }) as typeof app;
+    await (app as unknown as { ready: () => Promise<void> }).ready();
+  }, 30_000);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it("registers through the API without returning a password or token", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { email: "user@example.com", password: "correct horse battery staple" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ userId: "user_1", verificationSent: true });
+    expect(response.body).not.toContain("session-token");
+  });
+
+  it("sets a secure HttpOnly session cookie on login", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "user@example.com", password: "correct horse battery staple" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["set-cookie"]).toEqual(expect.stringContaining("video_session=session-token"));
+    expect(response.headers["set-cookie"]).toEqual(expect.stringContaining("HttpOnly"));
+  });
+
+  it("requires the session cookie for current-user access", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/auth/me" });
+    expect(response.statusCode).toBe(401);
+
+    const authenticated = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: { cookie: "video_session=session-token" }
+    });
+    expect(authenticated.statusCode).toBe(200);
+    expect(authService.authenticate).toHaveBeenCalledWith("session-token");
+  });
+});

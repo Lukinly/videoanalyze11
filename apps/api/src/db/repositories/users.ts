@@ -33,6 +33,9 @@ export function createUserRepository(pool: Pool) {
         [email]
       );
       return result.rows[0] ?? null;
+    },
+    async markEmailVerified(id: string, verifiedAt: Date): Promise<void> {
+      await pool.query(`UPDATE users SET email_verified_at = $2, updated_at = $2 WHERE id = $1`, [id, verifiedAt]);
     }
   };
 }
