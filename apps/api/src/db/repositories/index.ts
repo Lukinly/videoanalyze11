@@ -4,6 +4,7 @@ import { createAuthRepository } from "./auth.js";
 import { createUserRepository } from "./users.js";
 import { createVideoRepository } from "./videos.js";
 import { createAnalysisRunRepository } from "./analysis-runs.js";
+import { createSearchRepository } from "./search.js";
 
 export function createRepositories(pool: Pool) {
   return {
@@ -11,6 +12,7 @@ export function createRepositories(pool: Pool) {
     videos: createVideoRepository(pool),
     usage: createUsageRepository(pool),
     auth: createAuthRepository(pool),
-    runs: createAnalysisRunRepository(pool)
+    runs: createAnalysisRunRepository(pool),
+    search: createSearchRepository(pool)
   };
 }

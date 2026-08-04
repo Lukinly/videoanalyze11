@@ -45,6 +45,19 @@ button { cursor: pointer; }
 .play-mark { align-items: center; background: #d96844; border-radius: 999px; color: white; display: flex; font-size: 1.1rem; height: 52px; justify-content: center; padding-left: 3px; width: 52px; }
 .video-placeholder p { font-size: .8rem; }
 .side-column { min-width: 0; }
+.summary-panel, .chapter-panel, .search-panel { background: #fff; border: 1px solid #dfe7e4; border-radius: 20px; margin-bottom: 1rem; padding: 1.3rem 1.4rem; }
+.summary-panel h2 { color: #1c353b; font-size: 1.2rem; letter-spacing: -.035em; margin: 0; }
+.summary-panel > p:last-child { color: #66787c; font-size: .85rem; margin: .7rem 0 0; }
+.chapter-list, .search-results { list-style: none; margin: .8rem 0 0; padding: 0; }
+.chapter-list li + li, .search-results li + li { border-top: 1px solid #edf1ef; }
+.chapter-list button, .search-results button { align-items: flex-start; background: transparent; border: 0; color: #33484e; display: grid; font-size: .8rem; gap: .7rem; grid-template-columns: 3.2rem 1fr; padding: .7rem .1rem; text-align: left; width: 100%; }
+.chapter-list button:hover, .search-results button:hover { background: #fff6f2; border-radius: 8px; }
+.chapter-time, .search-results time { color: #d96844; font-variant-numeric: tabular-nums; }
+.chapter-list strong, .chapter-list small { display: block; }
+.chapter-list small { color: #7b898b; margin-top: .2rem; }
+.search-form { display: flex; gap: .5rem; margin-top: .75rem; }
+.search-form input { background: #f7faf8; border: 1px solid #d6e2dd; border-radius: 9px; min-width: 0; padding: .6rem .7rem; width: 100%; }
+.search-results { max-height: 220px; overflow-y: auto; }
 .transcript-panel { background: #fff; border: 1px solid #dfe7e4; border-radius: 20px; min-height: 440px; padding: 1.4rem; position: sticky; top: 2rem; }
 .count-badge, .status-pill { background: #edf3f0; border-radius: 999px; color: #617278; font-size: .7rem; padding: .3rem .55rem; }
 .transcript-list { list-style: none; margin: 1rem 0 0; padding: 0; }

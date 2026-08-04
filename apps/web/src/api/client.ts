@@ -17,6 +17,19 @@ export type AnalysisRun = {
   completedChunks?: number;
   totalChunks?: number;
   transcript?: { segments: TranscriptSegment[]; mergeWarnings: string[] };
+  summary?: {
+    oneLineSummary: string;
+    overallSummary: string;
+    chapters: Array<{ id: string; title: string; sourceSegmentIds: string[]; summary: string; bullets: Array<{ text: string; sourceSegmentIds: string[] }>; start?: number; end?: number; alignmentWarning?: boolean }>;
+  };
+};
+
+export type SearchResult = {
+  sourceType: "transcript" | "chapter" | "bullet";
+  sourceId: string;
+  text: string;
+  start: number;
+  end: number;
 };
 
 export type UploadSession = {
@@ -74,7 +87,8 @@ export const api = {
   }),
   startAnalysis: (videoId: string) => request<AnalysisRun>(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST" }),
   getAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}`),
-  cancelAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" })
+  cancelAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
+  search: (runId: string, query: string) => request<{ results: SearchResult[] }>(`/api/analysis-runs/${encodeURIComponent(runId)}/search?q=${encodeURIComponent(query)}`)
 };
 
 export function subscribeToAnalysis(

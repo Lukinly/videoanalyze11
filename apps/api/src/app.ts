@@ -6,6 +6,8 @@ import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerAnalysisRoutes, type AnalysisServiceContract } from "./routes/analysis.js";
 import { createProgressHub } from "./events/progress-hub.js";
 import { registerHealthRoutes, type ReadinessChecks } from "./routes/health.js";
+import { registerSearchRoutes } from "./routes/search.js";
+import type { SearchService } from "./search/search-service.js";
 
 export function buildApp(dependencies: {
   authService: AuthServiceContract;
@@ -13,6 +15,7 @@ export function buildApp(dependencies: {
   analysisService?: AnalysisServiceContract;
   progressHub?: ReturnType<typeof createProgressHub>;
   readinessChecks?: ReadinessChecks;
+  searchService?: SearchService;
 }): FastifyInstance {
   const app = Fastify({ logger: false });
 
@@ -32,6 +35,9 @@ export function buildApp(dependencies: {
   }
   if (dependencies.analysisService) {
     app.register(async (instance) => registerAnalysisRoutes(instance, { authService: dependencies.authService, analysisService: dependencies.analysisService!, progressHub: dependencies.progressHub ?? createProgressHub() }));
+  }
+  if (dependencies.searchService) {
+    app.register(async (instance) => registerSearchRoutes(instance, { authService: dependencies.authService, searchService: dependencies.searchService! }));
   }
   return app;
 }
