@@ -13,14 +13,14 @@ export type VideoRecord = {
 
 export function createVideoRepository(pool: Pool) {
   return {
-    async create(input: { userId: string; objectKey: string; fileName: string; fileSize?: number }): Promise<VideoRecord> {
+    async create(input: { id?: string; userId: string; objectKey: string; fileName: string; fileSize?: number }): Promise<VideoRecord> {
       const now = new Date();
       const result = await pool.query<VideoRecord>(
         `INSERT INTO videos (id, user_id, object_key, file_name, file_size, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $6)
          RETURNING id, user_id AS "userId", object_key AS "objectKey", file_name AS "fileName",
            file_size::bigint AS "fileSize", duration, status`,
-        [randomUUID(), input.userId, input.objectKey, input.fileName, input.fileSize ?? 0, now]
+        [input.id ?? randomUUID(), input.userId, input.objectKey, input.fileName, input.fileSize ?? 0, now]
       );
       return result.rows[0];
     },
