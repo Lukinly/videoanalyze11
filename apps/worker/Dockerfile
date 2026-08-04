@@ -16,4 +16,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certi
 COPY --from=build /workspace/node_modules ./node_modules
 COPY --from=build /workspace/apps/worker/dist ./dist
 COPY --from=build /workspace/apps/worker/package.json ./package.json
-CMD ["node", "dist/worker.js"]
+CMD ["node", "dist/worker-main.js"]

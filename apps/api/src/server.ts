@@ -44,6 +44,7 @@ const redisConnection = redisConnectionFromUrl(env.redisUrl);
 const queue = new Queue("video-analysis", { connection: redisConnection });
 const app = buildApp({
   authService,
+  secureCookies: env.nodeEnv === "production",
   uploadService: createUploadService({ videos: repositories.videos, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds }),
   analysisService: createAnalysisService({ videos: repositories.videos, usage: repositories.usage, runs: repositories.runs, queue }),
   searchService: createSearchService({ search: repositories.search }),

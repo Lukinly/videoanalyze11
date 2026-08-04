@@ -1,4 +1,4 @@
-import { bigint, integer, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -35,6 +35,22 @@ export const analysisRuns = pgTable("analysis_runs", {
   error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const chunks = pgTable("chunks", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  runId: text("run_id").notNull(),
+  chunkIndex: integer("chunk_index").notNull(),
+  startSeconds: real("start_seconds").notNull(),
+  endSeconds: real("end_seconds").notNull(),
+  objectKey: text("object_key").notNull(),
+  fileSize: bigint("file_size", { mode: "number" }).notNull().default(0),
+  status: text("status").notNull().default("pending"),
+  transcriptObjectKey: text("transcript_object_key"),
+  transcriptJson: jsonb("transcript_json"),
+  retryCount: integer("retry_count").notNull().default(0),
+  error: text("error")
 });
 
 export const usageLedger = pgTable("usage_ledger", {

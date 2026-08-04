@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'skipped')),
   transcript_object_key TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
+  transcript_json JSONB,
   error TEXT,
   UNIQUE (run_id, chunk_index)
 );
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
 );
 
 CREATE INDEX IF NOT EXISTS videos_user_id_idx ON videos(user_id);
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS transcript_json JSONB;
 CREATE INDEX IF NOT EXISTS analysis_runs_user_id_idx ON analysis_runs(user_id);
 CREATE INDEX IF NOT EXISTS chunks_run_id_idx ON chunks(run_id, chunk_index);
 CREATE INDEX IF NOT EXISTS transcript_segments_run_time_idx ON transcript_segments(run_id, start_seconds);

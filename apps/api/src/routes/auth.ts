@@ -10,7 +10,7 @@ export type AuthServiceContract = {
 
 const SESSION_COOKIE = "video_session";
 
-export async function registerAuthRoutes(app: FastifyInstance, authService: AuthServiceContract) {
+export async function registerAuthRoutes(app: FastifyInstance, authService: AuthServiceContract, options: { secureCookies?: boolean } = {}) {
   app.post<{ Body: { email: string; password: string } }>("/api/auth/register", async (request, reply) => {
     const result = await authService.register(request.body);
     return reply.code(202).send(result);
@@ -25,7 +25,7 @@ export async function registerAuthRoutes(app: FastifyInstance, authService: Auth
     const result = await authService.login(request.body);
     reply.setCookie(SESSION_COOKIE, result.sessionToken, {
       httpOnly: true,
-      secure: true,
+      secure: options.secureCookies ?? process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 30 * 24 * 60 * 60

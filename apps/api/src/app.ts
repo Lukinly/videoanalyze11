@@ -20,6 +20,7 @@ export function buildApp(dependencies: {
   searchService?: SearchService;
   mediaService?: MediaService;
   videoDeletion?: { videos: { listOwnedObjectKeys(userId: string, videoId: string): Promise<string[] | null>; markDeleted(userId: string, videoId: string): Promise<void> }; storage: { delete(key: string): Promise<void> } };
+  secureCookies?: boolean;
 }): FastifyInstance {
   const app = Fastify({ logger: false });
 
@@ -39,7 +40,7 @@ export function buildApp(dependencies: {
     return reply.code(500).send({ code: "INTERNAL_ERROR", message: "internal server error" });
   });
 
-  app.register(async (instance) => registerAuthRoutes(instance, dependencies.authService));
+  app.register(async (instance) => registerAuthRoutes(instance, dependencies.authService, { secureCookies: dependencies.secureCookies }));
   if (dependencies.uploadService) {
     app.register(async (instance) => registerUploadRoutes(instance, { authService: dependencies.authService, uploadService: dependencies.uploadService! }));
   }
