@@ -22,6 +22,13 @@ const migrationStatements = [
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
     original_expires_at TIMESTAMPTZ, result_expires_at TIMESTAMPTZ
   )`,
+  `CREATE TABLE IF NOT EXISTS analysis_runs (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    stage TEXT NOT NULL DEFAULT 'queued', status TEXT NOT NULL DEFAULT 'queued',
+    progress REAL NOT NULL DEFAULT 0, heartbeat_at TIMESTAMPTZ, error TEXT,
+    created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS usage_ledger (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     run_id TEXT, amount INTEGER NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
