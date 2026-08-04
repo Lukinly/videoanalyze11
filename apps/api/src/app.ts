@@ -5,16 +5,19 @@ import { registerAuthRoutes, type AuthServiceContract } from "./routes/auth.js";
 import { registerUploadRoutes } from "./routes/uploads.js";
 import { registerAnalysisRoutes, type AnalysisServiceContract } from "./routes/analysis.js";
 import { createProgressHub } from "./events/progress-hub.js";
+import { registerHealthRoutes, type ReadinessChecks } from "./routes/health.js";
 
 export function buildApp(dependencies: {
   authService: AuthServiceContract;
   uploadService?: { start(input: { userId: string; fileName: string; contentType: string; contentLength: number }): Promise<unknown> };
   analysisService?: AnalysisServiceContract;
   progressHub?: ReturnType<typeof createProgressHub>;
+  readinessChecks?: ReadinessChecks;
 }): FastifyInstance {
   const app = Fastify({ logger: false });
 
   app.register(cookie);
+  app.register(async (instance) => registerHealthRoutes(instance, dependencies.readinessChecks));
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) {
       return reply.code(error.status).send({ code: error.code, message: error.message });
