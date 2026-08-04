@@ -10,9 +10,10 @@ type VideoPlayerProps = {
   src?: string;
   title?: string;
   onTimeUpdate?: (seconds: number) => void;
+  onPlaybackValidation?: (event: "loadedmetadata" | "canplay" | "error") => void;
 };
 
-export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(function VideoPlayer({ src, title = "视频播放器", onTimeUpdate }, ref) {
+export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(function VideoPlayer({ src, title = "视频播放器", onTimeUpdate, onPlaybackValidation }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -32,6 +33,9 @@ export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(functi
           preload="metadata"
           src={src}
           aria-label={title}
+          onLoadedMetadata={() => onPlaybackValidation?.("loadedmetadata")}
+          onCanPlay={() => onPlaybackValidation?.("canplay")}
+          onError={() => onPlaybackValidation?.("error")}
           onTimeUpdate={(event) => onTimeUpdate?.(event.currentTarget.currentTime)}
         />
       ) : (

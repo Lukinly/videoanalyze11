@@ -32,6 +32,25 @@ export function createVideoRepository(pool: Pool) {
         [videoId, userId]
       );
       return result.rows[0] ?? null;
+    },
+    async listOwnedObjectKeys(userId: string, videoId: string): Promise<string[] | null> {
+      const video = await this.findOwnedById(userId, videoId);
+      if (!video) return null;
+      const runs = await pool.query<{ id: string }>("SELECT id FROM analysis_runs WHERE video_id = $1 AND user_id = $2", [videoId, userId]);
+      const keys = [video.objectKey];
+      for (const run of runs.rows) {
+        keys.push(`users/${encodeURIComponent(userId)}/runs/${encodeURIComponent(run.id)}/audio.flac`);
+        keys.push(`users/${encodeURIComponent(userId)}/runs/${encodeURIComponent(run.id)}/summary.json`);
+        const chunks = await pool.query<{ objectKey: string; transcriptObjectKey: string | null }>("SELECT object_key AS \"objectKey\", transcript_object_key AS \"transcriptObjectKey\" FROM chunks WHERE run_id = $1 AND user_id = $2", [run.id, userId]);
+        for (const chunk of chunks.rows) {
+          keys.push(chunk.objectKey);
+          if (chunk.transcriptObjectKey) keys.push(chunk.transcriptObjectKey);
+        }
+      }
+      return [...new Set(keys)];
+    },
+    async markDeleted(userId: string, videoId: string): Promise<void> {
+      await pool.query("UPDATE videos SET status = 'deleted', updated_at = $3 WHERE id = $1 AND user_id = $2", [videoId, userId, new Date()]);
     }
   };
 }

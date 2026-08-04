@@ -88,7 +88,9 @@ export const api = {
   startAnalysis: (videoId: string) => request<AnalysisRun>(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST" }),
   getAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}`),
   cancelAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
-  search: (runId: string, query: string) => request<{ results: SearchResult[] }>(`/api/analysis-runs/${encodeURIComponent(runId)}/search?q=${encodeURIComponent(query)}`)
+  search: (runId: string, query: string) => request<{ results: SearchResult[] }>(`/api/analysis-runs/${encodeURIComponent(runId)}/search?q=${encodeURIComponent(query)}`),
+  getPlaybackUrl: (videoId: string) => request<{ url: string }>(`/api/videos/${encodeURIComponent(videoId)}/playback-url`),
+  deleteVideo: (videoId: string) => request<void>(`/api/videos/${encodeURIComponent(videoId)}`, { method: "DELETE" })
 };
 
 export function subscribeToAnalysis(
