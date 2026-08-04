@@ -1,0 +1,10 @@
+{
+  "name": "@videoanalyze/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run src"
+  }
+}

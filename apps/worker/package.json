@@ -1,0 +1,10 @@
+{
+  "name": "@videoanalyze/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch dist/worker.js",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run src"
+  }
+}
