@@ -6,7 +6,7 @@ dist/
 build/
 coverage/
 .tmp/
-uploads/
-storage/
+/uploads/
+/storage/
 *.log
 *.tsbuildinfo
