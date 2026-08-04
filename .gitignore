@@ -9,4 +9,4 @@ coverage/
 uploads/
 storage/
 *.log
-
+*.tsbuildinfo
