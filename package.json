@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -b",
     "dev": "pnpm --parallel --filter @videoanalyze/api --filter @videoanalyze/worker --filter @videoanalyze/web dev",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "test:acceptance": "vitest run tests/acceptance"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

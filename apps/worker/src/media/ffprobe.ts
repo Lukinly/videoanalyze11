@@ -18,6 +18,7 @@ export function parseFfprobeJson(output: string): MediaInfo {
   const audioTracks = streams
     .filter((stream) => stream.codec_type === "audio")
     .map((stream, index) => ({ index, codec: stream.codec_name ?? "unknown", language: stream.tags?.language ?? null, channels: stream.channels ?? null }));
+  if (audioTracks.length === 0) throw new Error("video contains no audio track; V0 transcription requires audio");
 
   return mediaInfoSchema.parse({
     duration: Number(payload.format.duration),
