@@ -7,7 +7,7 @@ COPY apps/worker/package.json apps/worker/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/testkit/package.json packages/testkit/package.json
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY apps/api apps/api
 COPY packages/domain packages/domain
 RUN pnpm --filter @videoanalyze/api build

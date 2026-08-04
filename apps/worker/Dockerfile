@@ -5,7 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig
 COPY apps/worker/package.json apps/worker/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/testkit/package.json packages/testkit/package.json
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY apps/worker apps/worker
 COPY packages/domain packages/domain
 RUN pnpm --filter @videoanalyze/worker build
