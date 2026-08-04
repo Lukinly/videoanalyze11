@@ -8,6 +8,8 @@
     "test": "vitest run src"
   },
   "dependencies": {
-    "@videoanalyze/domain": "workspace:*"
+    "@videoanalyze/domain": "workspace:*",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0"
   }
 }
