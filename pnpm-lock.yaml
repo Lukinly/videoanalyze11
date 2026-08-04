@@ -80,7 +80,11 @@ importers:
 
   apps/web: {}
 
-  apps/worker: {}
+  apps/worker:
+    dependencies:
+      '@videoanalyze/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
 
   packages/domain:
     dependencies:

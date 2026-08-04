@@ -6,5 +6,8 @@
     "dev": "node --watch dist/worker.js",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run src"
+  },
+  "dependencies": {
+    "@videoanalyze/domain": "workspace:*"
   }
 }
