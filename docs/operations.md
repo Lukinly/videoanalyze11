@@ -8,7 +8,7 @@
 4. Run `corepack pnpm install`, `corepack pnpm typecheck`, `corepack pnpm lint`, and `corepack pnpm test`.
 5. Build the browser client with `corepack pnpm --filter @videoanalyze/web build`.
 
-The compose file includes PostgreSQL, Redis, MinIO, Mailpit, API, worker, web, and Caddy. In production, replace MinIO credentials, set a real `PUBLIC_HOST`, terminate HTTPS at Caddy, and use a managed PostgreSQL/Redis/S3-compatible service where appropriate.
+The Compose project is named `videoan`; its default containers are consequently named like `videoan-postgres-1`, `videoan-api-1`, and `videoan-worker-1`. The compose file includes PostgreSQL, Redis, MinIO, Mailpit, API, worker, web, and Caddy. In production, replace MinIO credentials, set a real `PUBLIC_HOST`, terminate HTTPS at Caddy, and use a managed PostgreSQL/Redis/S3-compatible service where appropriate.
 
 ## Retention and limits
 
