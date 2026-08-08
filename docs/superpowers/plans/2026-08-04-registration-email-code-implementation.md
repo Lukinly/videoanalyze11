@@ -124,7 +124,11 @@ Create `0003_registration_verifications.sql` with a unique normalized-email key,
 
 Define `registrationVerifications` in `schema.ts`. In `auth.ts`, implement replacement with PostgreSQL `ON CONFLICT (email) DO UPDATE`, lookup ordered by the unique email, `UPDATE ... SET attempts = attempts + 1 ... RETURNING attempts`, and conditional single-use `UPDATE ... WHERE used_at IS NULL RETURNING id`.
 
-- [ ] **Step 5: Run the repository test and commit the persistence slice**
+- [ ] **Step 5: Reset the new table in service-test setup**
+
+Add `await pool.query("DELETE FROM registration_verifications");` to the `beforeEach` cleanup in `apps/api/src/auth/auth.test.ts` before the auth-service tests begin using the new records.
+
+- [ ] **Step 6: Run the repository test and commit the persistence slice**
 
 Run: `corepack pnpm vitest run apps/api/src/db/registration-verifications.test.ts`
 
