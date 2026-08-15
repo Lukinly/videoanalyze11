@@ -66,7 +66,7 @@ export function createAnthropicSummaryProvider(input: {
     },
     async generateNotes(summaryInput: SummaryInput): Promise<AiNotes> {
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        try { return aiNotesSchema.parse(await request(notesSystemPrompt, summaryInput)); }
+        try { return aiNotesSchema.parse(normalizeProviderCitationTimes(await request(notesSystemPrompt, summaryInput))); }
         catch (error) {
           const retryableInvalidResponse = !(error instanceof ProviderError) || error.code === "invalid_request";
           if (attempt === 0 && retryableInvalidResponse) continue;
@@ -76,5 +76,25 @@ export function createAnthropicSummaryProvider(input: {
       }
       throw new ProviderError("invalid_request", "notes response did not match the AI notes schema");
     }
+  };
+}
+
+function normalizeProviderCitationTimes(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.sections)) return value;
+  return {
+    ...record,
+    sections: record.sections.map((section) => {
+      if (!section || typeof section !== "object") return section;
+      const sectionRecord = section as Record<string, unknown>;
+      if (!Array.isArray(sectionRecord.citations)) return section;
+      return {
+        ...sectionRecord,
+        citations: sectionRecord.citations.map((citation) => citation && typeof citation === "object"
+          ? { ...(citation as Record<string, unknown>), timestampSeconds: 0 }
+          : citation)
+      };
+    })
   };
 }
