@@ -1,3 +1,4 @@
+import { dirname, join } from "node:path";
 import type { AsrProvider } from "@videoanalyze/domain";
 import { mergeChunkTranscripts } from "./transcript-merge.js";
 import { AnalysisCancelledError, cancellationOutcome } from "./cancellation.js";
@@ -51,7 +52,7 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
         }
 
         await dependencies.state.markChunkProcessing(input.runId, chunk.index);
-        const rendered = await dependencies.media.renderChunk(run.audioPath, `/tmp/${input.runId}-chunk-${chunk.index}.flac`, chunk.start, chunk.end - chunk.start, input.signal);
+        const rendered = await dependencies.media.renderChunk(run.audioPath, join(dirname(run.audioPath), `chunk-${chunk.index}.flac`), chunk.start, chunk.end - chunk.start, input.signal);
         const result = await dependencies.asr.transcribeChunk({ audioFile: rendered.path, language: null, timestampLevel: "segment" });
         await dependencies.state.saveChunkTranscript(input.runId, chunk.index, result.segments);
         await dependencies.state.markChunkCompleted(input.runId, chunk.index);

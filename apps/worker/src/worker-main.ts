@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Pool } from "pg";
 import { createAnalysisConsumer } from "./queue/analysis-consumer.js";
 import type { AnalysisJob } from "./queue/queues.js";
@@ -17,6 +17,13 @@ import { createWorkerCreditRepository } from "./credits/credit-repository.js";
 import { AnalysisCancelledError } from "./analysis/cancellation.js";
 import { settleAnalysisFailure, settleAnalysisSuccess } from "./analysis/settlement.js";
 import { createResultStore, privacyResultExpiry, type ResultStore } from "./results/result-store.js";
+import {
+  cleanupRunMedia,
+  createMediaCleanupRepository,
+  removeValidatedRunDirectory,
+  runAnalysisToTerminal,
+  validatedRunDirectory
+} from "./retention/media-cleanup.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -48,6 +55,7 @@ const summaryProvider = env.llmApiKey && env.llmApiBaseUrl && env.llmApiModel
   : null;
 const credits = createWorkerCreditRepository(pool);
 const results = createResultStore(pool);
+const mediaCleanup = createMediaCleanupRepository(pool);
 const clock = { now: () => new Date() };
 
 const consumer = createAnalysisConsumer({
@@ -55,39 +63,43 @@ const consumer = createAnalysisConsumer({
   concurrency: Number.isSafeInteger(env.concurrency) && env.concurrency > 0 ? env.concurrency : 2,
   runner: {
     async run(job: AnalysisJob & { signal: AbortSignal }) {
-      const directory = `/tmp/videoanalyze/${job.runId}`;
+      const directory = validatedRunDirectory(job.runId);
       const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, clock });
-      let runnerCompleted = false;
-      try {
-        await createV0AnalysisRunner({ asr, media, state }).run(job);
-        if (summaryProvider) {
-          try {
-            await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
-          } catch (summaryError) {
-            // Summary is a P1 enhancement; a failure must not discard the transcript.
-            console.error("summary generation failed", job.runId, summaryError);
+      await runAnalysisToTerminal({
+        async runAndPersist() {
+          await createV0AnalysisRunner({ asr, media, state }).run(job);
+          if (summaryProvider) {
+            try {
+              await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
+            } catch (summaryError) {
+              // Summary is a P1 enhancement; a failure must not discard the transcript.
+              console.error("summary generation failed", job.runId, summaryError);
+            }
           }
-        }
-        await state.setStage(job.runId, "completed", 1);
-        runnerCompleted = true;
-        await settleAnalysisSuccess({ runId: job.runId, credits });
-      } catch (error) {
-        if (!runnerCompleted) {
-          try {
-            await settleAnalysisFailure({ runId: job.runId, error, credits });
-          } catch (settlementError) {
-            console.error("credit settlement failed", settlementError);
-          }
-        } else {
-          console.error("credit charge failed after analysis completed", error);
-          throw error;
-        }
-        const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
-        await pool.query("UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4 WHERE id = $1", [job.runId, status, error instanceof Error ? error.message : "analysis failed", new Date()]);
-        throw error;
-      } finally {
-        await rm(directory, { recursive: true, force: true });
-      }
+        },
+        markCompleted: () => state.setStage(job.runId, "completed", 1),
+        async markFailedOrCancelled(error) {
+          const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
+          await pool.query(
+            `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
+             WHERE id = $1 AND status <> 'completed'`,
+            [job.runId, status, error instanceof Error ? error.message : "analysis failed", clock.now()]
+          );
+        },
+        settleSuccess: () => settleAnalysisSuccess({ runId: job.runId, credits }),
+        settleFailure: (error) => settleAnalysisFailure({ runId: job.runId, error, credits }),
+        cleanupMedia: () => cleanupRunMedia({
+          runId: job.runId,
+          storage: {
+            async delete(objectKey) {
+              await s3.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: objectKey }));
+            }
+          },
+          repository: mediaCleanup,
+          now: clock.now()
+        }),
+        removeLocalMedia: () => removeValidatedRunDirectory(job.runId)
+      });
     }
   }
 });
