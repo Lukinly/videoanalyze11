@@ -65,11 +65,16 @@ export function createAnthropicSummaryProvider(input: {
       }
     },
     async generateNotes(summaryInput: SummaryInput): Promise<AiNotes> {
-      try { return aiNotesSchema.parse(await request(notesSystemPrompt, summaryInput)); }
-      catch (error) {
-        if (error instanceof ProviderError) throw error;
-        throw new ProviderError("invalid_request", "notes response did not match the AI notes schema");
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try { return aiNotesSchema.parse(await request(notesSystemPrompt, summaryInput)); }
+        catch (error) {
+          const retryableInvalidResponse = !(error instanceof ProviderError) || error.code === "invalid_request";
+          if (attempt === 0 && retryableInvalidResponse) continue;
+          if (error instanceof ProviderError) throw error;
+          throw new ProviderError("invalid_request", "notes response did not match the AI notes schema");
+        }
       }
+      throw new ProviderError("invalid_request", "notes response did not match the AI notes schema");
     }
   };
 }

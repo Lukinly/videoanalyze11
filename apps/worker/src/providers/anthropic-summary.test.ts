@@ -69,4 +69,16 @@ describe("anthropic-compatible summary provider", () => {
     const body = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string);
     expect(body.system).toContain("study notes");
   });
+
+  it("retries one malformed notes response before failing the analysis", async () => {
+    const { createAnthropicSummaryProvider } = await import("./anthropic-summary.js");
+    const notes = { title: "笔记", topic: "主题", coreIdeas: ["观点"], sections: [{ id: "s", level: 1, title: "节", body: "内容", citations: [{ segmentId: "seg_1", timestampSeconds: 0 }] }], reviewPoints: ["复习"] };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: [{ type: "text", text: "{}" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(notes) }] }), { status: 200 }));
+    const provider = createAnthropicSummaryProvider({ apiKey: "test-key", baseUrl: "https://api.deepseek.com/anthropic", model: "m", fetchImpl });
+
+    await expect(provider.generateNotes({ videoDuration: 1, segments: [{ id: "seg_1", runId: "r", start: 0, end: 1, text: "t" }] })).resolves.toEqual(notes);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
