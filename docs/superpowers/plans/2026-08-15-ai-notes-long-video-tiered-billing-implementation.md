@@ -1,5 +1,7 @@
 # AI Notes, Long Video, and Tiered Billing Implementation Plan
 
+**Status:** Completed and verified on 2026-08-15. The implementation spans commits `e008991` through `c58cf35`; full automated and real local verification evidence is recorded in the handoff document.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver server-duration tiered billing, immutable billing snapshots, four-hour analysis, detailed persistent AI notes, a dedicated notes page, and queue/resource admission protection.

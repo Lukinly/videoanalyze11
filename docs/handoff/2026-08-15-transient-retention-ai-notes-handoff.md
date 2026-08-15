@@ -5,6 +5,18 @@
 隔离工作区：`/mnt/v/Vworkspace/videoanlast-worktrees/transient-retention-ai-notes`  
 隔离分支：`codex/transient-retention-ai-notes`
 
+## 0. 完成状态（2026-08-15 更新）
+
+本交接文档中原列出的剩余任务现已全部完成。后续章节保留的是接手时的历史状态，不再代表当前待办。
+
+- Task 5 的两个 fencing/积分释放问题已修复；Task 6–9 的结果生命周期、UI、备份和验收均已完成。
+- 下一阶段功能已完成：`duration-tiered-v2` 真实时长计费与不可变快照、4 小时上限、详细 AI 笔记及隐私隔离、独立笔记页与导出、队列/FFmpeg/长视频并发保护。
+- 实施计划：`docs/superpowers/plans/2026-08-15-ai-notes-long-video-tiered-billing-implementation.md`。
+- 最终自动验证：87 个测试文件、316 项测试通过；typecheck、lint、生产 build 通过；7 个 acceptance 文件、52 项验收测试通过。
+- 已在现有 PostgreSQL 数据卷上成功应用迁移 `0008`；18 条旧分析保持原计费状态，未被回填新快照。
+- 真实本地上传验证通过：终态 completed、原片已删除、结果可用、281 个转录片段、5 个章节；验证器内部同时确认 AI 笔记存在、`duration-tiered-v2` 快照有效且仅有一笔金额匹配的分析扣费。
+- 真实验证中发现并修复了模型时间戳格式漂移：只采用模型返回的真实 segment ID，时间戳始终由服务端转录片段解析；非法结构会重试一次，虚构引用仍会拒绝。
+
 ## 1. 用户要求与下次执行原则
 
 后续会话继续完成临时媒体保留、结果生命周期、阶梯积分、4 小时视频和详细 AI 笔记。
