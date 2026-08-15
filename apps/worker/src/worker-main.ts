@@ -12,11 +12,11 @@ import { createMediaProcessor } from "./media/media-processor.js";
 import { createGroqAsrProvider } from "./providers/groq-asr.js";
 import { createAnthropicSummaryProvider } from "./providers/anthropic-summary.js";
 import { createV1SummaryRunner } from "./summary/v1-runner.js";
-import type { AlignedChapter } from "./summary/alignment.js";
-import type { SummaryResult } from "@videoanalyze/domain";
+import type { RetentionMode, TranscriptSegment } from "@videoanalyze/domain";
 import { createWorkerCreditRepository } from "./credits/credit-repository.js";
 import { AnalysisCancelledError } from "./analysis/cancellation.js";
 import { settleAnalysisFailure, settleAnalysisSuccess } from "./analysis/settlement.js";
+import { createResultStore, privacyResultExpiry, type ResultStore } from "./results/result-store.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -47,6 +47,8 @@ const summaryProvider = env.llmApiKey && env.llmApiBaseUrl && env.llmApiModel
   ? createAnthropicSummaryProvider({ apiKey: env.llmApiKey, baseUrl: env.llmApiBaseUrl, model: env.llmApiModel, contextWindow: env.llmContextWindow })
   : null;
 const credits = createWorkerCreditRepository(pool);
+const results = createResultStore(pool);
+const clock = { now: () => new Date() };
 
 const consumer = createAnalysisConsumer({
   connection: redisConnectionFromUrl(env.redisUrl),
@@ -54,7 +56,7 @@ const consumer = createAnalysisConsumer({
   runner: {
     async run(job: AnalysisJob & { signal: AbortSignal }) {
       const directory = `/tmp/videoanalyze/${job.runId}`;
-      const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media });
+      const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, clock });
       let runnerCompleted = false;
       try {
         await createV0AnalysisRunner({ asr, media, state }).run(job);
@@ -93,7 +95,26 @@ const consumer = createAnalysisConsumer({
 process.once("SIGTERM", async () => { await consumer.close(); await pool.end(); });
 process.once("SIGINT", async () => { await consumer.close(); await pool.end(); });
 
-function createDatabaseState(input: { pool: Pool; s3: S3Client; bucket: string; directory: string; media: ReturnType<typeof createMediaProcessor> }) {
+function createDatabaseState(input: {
+  pool: Pool;
+  s3: S3Client;
+  bucket: string;
+  directory: string;
+  media: ReturnType<typeof createMediaProcessor>;
+  results: ResultStore;
+  clock: { now(): Date };
+}) {
+  async function getResultContext(runId: string) {
+    const result = await input.pool.query<{ userId: string; mode: RetentionMode; expiresAt: Date | null }>(
+      `SELECT user_id AS "userId", retention_mode AS mode, result_expires_at AS "expiresAt"
+       FROM analysis_runs WHERE id = $1`,
+      [runId]
+    );
+    const context = result.rows[0];
+    if (!context) throw new Error("analysis run does not exist");
+    return context;
+  }
+
   return {
     async getRun(runId: string) {
       const result = await input.pool.query<{ userId: string; objectKey: string; duration: number | null }>(
@@ -131,11 +152,18 @@ function createDatabaseState(input: { pool: Pool; s3: S3Client; bucket: string; 
       return this.getChunks(runId);
     },
     async setStage(runId: string, stage: string, progress = 0) {
+      const updatedAt = input.clock.now();
+      if (stage === "completed") {
+        const context = await getResultContext(runId);
+        if (context.mode === "privacy") {
+          await input.results.finalizePrivacyExpiry(runId, privacyResultExpiry(updatedAt));
+        }
+      }
       await input.pool.query(
         `UPDATE analysis_runs SET stage = $2, progress = $3,
            status = CASE WHEN $2 = 'completed' THEN 'completed' WHEN status = 'queued' THEN 'running' ELSE status END,
            heartbeat_at = $4, updated_at = $4 WHERE id = $1`,
-        [runId, stage, progress, new Date()]
+        [runId, stage, progress, updatedAt]
       );
     },
     async isCancelling(runId: string) {
@@ -146,47 +174,16 @@ function createDatabaseState(input: { pool: Pool; s3: S3Client; bucket: string; 
     async saveChunkTranscript(runId: string, index: number, transcript: Array<{ start: number; end: number; text: string }>) { await input.pool.query("UPDATE chunks SET transcript_json = $3 WHERE run_id = $1 AND chunk_index = $2", [runId, index, JSON.stringify(transcript)]); },
     async markChunkCompleted(runId: string, index: number) { await input.pool.query("UPDATE chunks SET status = 'completed' WHERE run_id = $1 AND chunk_index = $2", [runId, index]); },
     async saveTranscript(runId: string, segments: unknown[], mergeWarnings: string[]) {
-      const owner = await input.pool.query<{ userId: string }>("SELECT user_id AS \"userId\" FROM analysis_runs WHERE id = $1", [runId]);
-      const userId = owner.rows[0]?.userId;
-      if (!userId) throw new Error("analysis owner does not exist");
-      await input.pool.query("DELETE FROM transcript_segments WHERE run_id = $1", [runId]);
-      for (const [index, value] of segments.entries()) {
-        const segment = value as { start: number; end: number; text: string };
-        await input.pool.query("INSERT INTO transcript_segments (id, user_id, run_id, start_seconds, end_seconds, text) VALUES ($1, $2, $3, $4, $5, $6)", [`${runId}_seg_${index + 1}`, userId, runId, segment.start, segment.end, segment.text]);
-      }
+      const context = await getResultContext(runId);
+      await input.results.saveTranscript({ runId, userId: context.userId, mode: context.mode, expiresAt: context.expiresAt, segments: segments as TranscriptSegment[] });
       if (mergeWarnings.length > 0) await input.pool.query("UPDATE analysis_runs SET error = $2 WHERE id = $1", [runId, mergeWarnings.join("; ")]);
     },
-    async getTranscript(runId: string): Promise<{ duration: number; segments: Array<{ id: string; runId: string; start: number; end: number; text: string }> }> {
-      const run = await input.pool.query<{ duration: number | null }>(
-        "SELECT v.duration FROM analysis_runs ar JOIN videos v ON v.id = ar.video_id WHERE ar.id = $1", [runId]
-      );
-      const segments = await input.pool.query<{ id: string; start: number; end: number; text: string }>(
-        "SELECT id, start_seconds AS start, end_seconds AS end, text FROM transcript_segments WHERE run_id = $1 ORDER BY start_seconds", [runId]
-      );
-      return {
-        duration: run.rows[0]?.duration ?? 0,
-        segments: segments.rows.map((segment) => ({ id: segment.id, runId, start: segment.start, end: segment.end, text: segment.text }))
-      };
+    async getTranscript(runId: string) {
+      return input.results.getTranscript(runId);
     },
-    async saveSummary(runId: string, result: SummaryResult & { chapters: Array<SummaryResult["chapters"][number] & AlignedChapter> }) {
-      const owner = await input.pool.query<{ userId: string }>("SELECT user_id AS \"userId\" FROM analysis_runs WHERE id = $1", [runId]);
-      const userId = owner.rows[0]?.userId;
-      if (!userId) throw new Error("analysis owner does not exist");
-      await input.pool.query(
-        `UPDATE analysis_runs SET summary_json = $2, updated_at = $3 WHERE id = $1`,
-        [runId, JSON.stringify({ oneLineSummary: result.oneLineSummary, overallSummary: result.overallSummary }), new Date()]
-      );
-      await input.pool.query("DELETE FROM chapters WHERE run_id = $1", [runId]);
-      for (const chapter of result.chapters) {
-        // chapters.id is the primary key and must be globally unique across
-        // runs, but the model emits short per-run ids like "ch1". Prefix with
-        // the run id so inserting a second run's chapters never collides.
-        await input.pool.query(
-          `INSERT INTO chapters (id, user_id, run_id, title, start_seconds, end_seconds, summary, bullets_json, source_segment_ids_json, alignment_warning)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [`${runId}_${chapter.id}`, userId, runId, chapter.title, chapter.start, chapter.end, chapter.summary, JSON.stringify(chapter.bullets), JSON.stringify(chapter.sourceSegmentIds), chapter.alignmentWarning]
-        );
-      }
+    async saveSummary(runId: string, result: Parameters<ResultStore["saveSummary"]>[0]["result"]) {
+      const context = await getResultContext(runId);
+      await input.results.saveSummary({ runId, userId: context.userId, mode: context.mode, expiresAt: context.expiresAt, result });
     }
   };
 }

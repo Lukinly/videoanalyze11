@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
+import { retentionModeSchema, type RetentionMode } from "@videoanalyze/domain";
 import type { AuthServiceContract } from "./auth.js";
 import type { ProgressEvent } from "../events/progress-hub.js";
 
 export type AnalysisServiceContract = {
-  start(input: { userId: string; videoId: string }): Promise<unknown>;
+  start(input: { userId: string; videoId: string; retentionMode: RetentionMode }): Promise<unknown>;
   get(input: { userId: string; runId: string }): Promise<unknown & { id?: string }>;
   cancel(input: { userId: string; runId: string }): Promise<unknown>;
 };
@@ -13,10 +14,14 @@ type ProgressHub = {
 };
 
 export async function registerAnalysisRoutes(app: FastifyInstance, dependencies: { authService: AuthServiceContract; analysisService: AnalysisServiceContract; progressHub: ProgressHub }) {
-  app.post<{ Params: { videoId: string } }>("/api/videos/:videoId/analysis-runs", async (request, reply) => {
+  app.post<{ Params: { videoId: string }; Body: { retentionMode?: unknown } }>("/api/videos/:videoId/analysis-runs", async (request, reply) => {
     const userId = await authenticatedUserId(request, dependencies.authService);
     if (!userId) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
-    return reply.code(202).send(await dependencies.analysisService.start({ userId, videoId: request.params.videoId }));
+    const retentionMode = retentionModeSchema.safeParse(request.body?.retentionMode ?? "standard");
+    if (!retentionMode.success) {
+      return reply.code(400).send({ code: "INVALID_RETENTION_MODE", message: "retentionMode must be standard or privacy" });
+    }
+    return reply.code(202).send(await dependencies.analysisService.start({ userId, videoId: request.params.videoId, retentionMode: retentionMode.data }));
   });
 
   app.get<{ Params: { runId: string } }>("/api/analysis-runs/:runId", async (request, reply) => {

@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { RetentionMode } from "@videoanalyze/domain";
 
 export type AnalysisRunRecord = {
   id: string;
@@ -8,6 +9,9 @@ export type AnalysisRunRecord = {
   status: string;
   progress: number;
   error: string | null;
+  displayName: string;
+  retentionMode: RetentionMode;
+  resultExpiresAt: Date | null;
   completedChunks: number;
   totalChunks: number;
   summaryJson?: unknown;
@@ -30,19 +34,22 @@ export type AnalysisRunRecord = {
 
 export function createAnalysisRunRepository(pool: Pool) {
   return {
-    async create(input: { id: string; userId: string; videoId: string }): Promise<AnalysisRunRecord> {
+    async create(input: { id: string; userId: string; videoId: string; displayName?: string; retentionMode?: RetentionMode }): Promise<AnalysisRunRecord> {
       const now = new Date();
       const result = await pool.query<AnalysisRunRecord>(
-        `INSERT INTO analysis_runs (id, user_id, video_id, stage, status, progress, created_at, updated_at)
-         VALUES ($1, $2, $3, 'queued', 'queued', 0, $4, $4)
-         RETURNING id, user_id AS "userId", video_id AS "videoId", stage, status, progress, error`,
-        [input.id, input.userId, input.videoId, now]
+        `INSERT INTO analysis_runs (id, user_id, video_id, display_name, retention_mode, stage, status, progress, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'queued', 'queued', 0, $6, $6)
+         RETURNING id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
+           retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", stage, status, progress, error`,
+        [input.id, input.userId, input.videoId, input.displayName ?? "", input.retentionMode ?? "standard", now]
       );
       return { ...result.rows[0], completedChunks: 0, totalChunks: 0 };
     },
     async findOwnedById(userId: string, runId: string): Promise<AnalysisRunRecord | null> {
       const result = await pool.query<AnalysisRunRecord & { summaryJson: unknown }>(
-        `SELECT id, user_id AS "userId", video_id AS "videoId", stage, status, progress, error, summary_json AS "summaryJson"
+        `SELECT id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
+                retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt",
+                stage, status, progress, error, summary_json AS "summaryJson"
          FROM analysis_runs WHERE id = $1 AND user_id = $2`,
         [runId, userId]
       );
@@ -54,9 +61,11 @@ export function createAnalysisRunRepository(pool: Pool) {
          FROM chunks WHERE run_id = $1`,
         [runId]
       );
+      const segmentTable = run.retentionMode === "privacy" ? "ephemeral_transcript_segments" : "transcript_segments";
+      const chapterTable = run.retentionMode === "privacy" ? "ephemeral_chapters" : "chapters";
       const segments = await pool.query<{ id: string; start: number; end: number; text: string }>(
         `SELECT id, start_seconds AS "start", end_seconds AS "end", text
-         FROM transcript_segments WHERE run_id = $1 AND user_id = $2 ORDER BY start_seconds`,
+         FROM ${segmentTable} WHERE run_id = $1 AND user_id = $2 ORDER BY start_seconds`,
         [runId, userId]
       );
       const chapters = await pool.query<{
@@ -66,9 +75,17 @@ export function createAnalysisRunRepository(pool: Pool) {
         `SELECT id, title, start_seconds AS "start", end_seconds AS "end", summary,
                 bullets_json AS "bulletsJson", source_segment_ids_json AS "sourceSegmentIdsJson",
                 alignment_warning AS "alignmentWarning"
-         FROM chapters WHERE run_id = $1 AND user_id = $2 ORDER BY start_seconds`,
+         FROM ${chapterTable} WHERE run_id = $1 AND user_id = $2 ORDER BY start_seconds`,
         [runId, userId]
       );
+      if (run.retentionMode === "privacy") {
+        const ephemeralSummary = await pool.query<{ oneLineSummary: string; overallSummary: string }>(
+          `SELECT one_line_summary AS "oneLineSummary", overall_summary AS "overallSummary"
+           FROM ephemeral_run_summaries WHERE run_id = $1 AND user_id = $2`,
+          [runId, userId]
+        );
+        run.summaryJson = ephemeralSummary.rows[0] ?? null;
+      }
       const record: AnalysisRunRecord = { ...run, ...chunks.rows[0] };
       if (segments.rows.length > 0) {
         record.transcript = {

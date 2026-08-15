@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { DomainError } from "@videoanalyze/domain";
+import { DomainError, type RetentionMode } from "@videoanalyze/domain";
 import { calculateAnalysisCost } from "../credits/credit-cost.js";
 
 type AnalysisRepositories = {
-  videos: { findOwnedById(userId: string, videoId: string): Promise<{ id: string; userId: string; fileSize: number } | null> };
+  videos: { findOwnedById(userId: string, videoId: string): Promise<{ id: string; userId: string; fileName: string; fileSize: number } | null> };
   credits: {
     reserveAnalysis(input: { userId: string; runId: string; amount: number }): Promise<"held" | "already_held" | "exhausted">;
     releaseReservation(runId: string, reason: string): Promise<void>;
     getBalance?: (userId: string) => Promise<{ ledgerBalance: number; held: number; available: number }>;
   };
   runs: {
-    create(input: { id: string; userId: string; videoId: string }): Promise<{ id: string; status: string }>;
+    create(input: { id: string; userId: string; videoId: string; displayName: string; retentionMode: RetentionMode }): Promise<{ id: string; status: string }>;
     findOwnedById(userId: string, runId: string): Promise<{ id: string } | null>;
     requestCancellation(userId: string, runId: string): Promise<{ id: string } | null>;
   };
@@ -18,9 +18,10 @@ type AnalysisRepositories = {
 
 export function createAnalysisService(dependencies: AnalysisRepositories & { queue: { add(name: string, data: unknown, options: { jobId: string }): Promise<unknown> } }) {
   return {
-    async start(input: { userId: string; videoId: string }) {
+    async start(input: { userId: string; videoId: string; retentionMode?: RetentionMode }) {
       const video = await dependencies.videos.findOwnedById(input.userId, input.videoId);
       if (!video) throw new DomainError("NOT_FOUND", "video not found", 404);
+      const retentionMode = input.retentionMode ?? "standard";
 
       const estimatedCost = calculateAnalysisCost(Number(video.fileSize));
       const runId = randomUUID();
@@ -34,7 +35,7 @@ export function createAnalysisService(dependencies: AnalysisRepositories & { que
       }
 
       try {
-        const run = await dependencies.runs.create({ id: runId, userId: input.userId, videoId: video.id });
+        const run = await dependencies.runs.create({ id: runId, userId: input.userId, videoId: video.id, displayName: video.fileName, retentionMode });
         await dependencies.queue.add("analysis", { userId: input.userId, videoId: video.id, runId }, { jobId: runId });
         return { ...run, estimatedCost };
       } catch (error) {

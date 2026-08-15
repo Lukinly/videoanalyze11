@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("analysis routes", () => {
   const authService = {
@@ -22,13 +22,41 @@ describe("analysis routes", () => {
     await app.close();
   });
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("starts a run only for an authenticated user", async () => {
     const unauthorized = await app.inject({ method: "POST", url: "/api/videos/video_1/analysis-runs" });
     expect(unauthorized.statusCode).toBe(401);
 
     const response = await app.inject({ method: "POST", url: "/api/videos/video_1/analysis-runs", headers: { cookie: "video_session=session-token" } });
     expect(response.statusCode).toBe(202);
-    expect(analysisService.start).toHaveBeenCalledWith({ userId: "user_1", videoId: "video_1" });
+    expect(analysisService.start).toHaveBeenCalledWith({ userId: "user_1", videoId: "video_1", retentionMode: "standard" });
+  });
+
+  it("passes an explicitly selected privacy mode to the analysis service", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/videos/video_1/analysis-runs",
+      headers: { cookie: "video_session=session-token" },
+      payload: { retentionMode: "privacy" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(analysisService.start).toHaveBeenCalledWith({ userId: "user_1", videoId: "video_1", retentionMode: "privacy" });
+  });
+
+  it("rejects unsupported retention modes before starting a run", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/videos/video_1/analysis-runs",
+      headers: { cookie: "video_session=session-token" },
+      payload: { retentionMode: "forever" }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(analysisService.start).not.toHaveBeenCalled();
   });
 
   it("returns the current run and accepts cancellation", async () => {
