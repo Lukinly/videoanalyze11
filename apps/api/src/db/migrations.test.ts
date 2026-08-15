@@ -21,4 +21,10 @@ describe("database migrations", () => {
     expect(sql).toContain("cleanup_lease_expires_at");
     expect(sql).toContain("cleanup_claim_token");
   });
+
+  it("adds a durable analysis failure classification", async () => {
+    const sql = await readFile(join(migrations, "0007_analysis_failure_kind.sql"), "utf8");
+    expect(sql).toContain("failure_kind");
+    expect(sql).toContain("stale_timeout");
+  });
 });

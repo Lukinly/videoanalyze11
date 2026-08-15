@@ -5,7 +5,7 @@ describe("v0 analysis runner", () => {
     const { createV0AnalysisRunner } = await import("./v0-runner.js");
     const state = createFakeState();
     const stageCalls: string[] = [];
-    state.setStage = async (_runId: string, stage: string) => { stageCalls.push(stage); };
+    state.setStage = async (_runId: string, stage: string) => { stageCalls.push(stage); return true; };
     state.getRun = async () => {
       expect(stageCalls).toEqual(["probing"]);
       return { inputVideoPath: "/tmp/video.mp4", audioPath: "/tmp/audio.flac", duration: 20 };
@@ -49,6 +49,31 @@ describe("v0 analysis runner", () => {
     expect(state.completedChunkIndexes).toEqual([0, 1]);
     expect(state.savedChunkIndexes).toEqual([1]);
   });
+
+  it("stops before creating chunk metadata when the run loses its stage fence", async () => {
+    const { createV0AnalysisRunner } = await import("./v0-runner.js");
+    const state = createFakeState();
+    const getChunks = vi.fn(state.getChunks);
+    state.getChunks = getChunks;
+    state.setStage = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const runner = createV0AnalysisRunner({
+      asr: { transcribeChunk: vi.fn() },
+      media: { extractAudio: vi.fn(), renderChunk: vi.fn() },
+      state
+    });
+
+    await expect(runner.run({
+      userId: "user_1",
+      videoId: "video_1",
+      runId: "run_1",
+      signal: new AbortController().signal
+    })).rejects.toThrow("analysis run is no longer writable");
+
+    expect(getChunks).not.toHaveBeenCalled();
+  });
 });
 
 function createFakeState() {
@@ -64,7 +89,7 @@ function createFakeState() {
         { index: 1, start: 10, end: 20, status: "pending" as const, transcript: null }
       ];
     },
-    async setStage(...args: [string, string, number?]) { void args; },
+    async setStage(...args: [string, string, number?]) { void args; return true; },
     async markChunkProcessing() {},
     async saveChunkTranscript(_runId: string, index: number) { state.savedChunkIndexes.push(index); },
     async markChunkCompleted(_runId: string, index: number) { state.completedChunkIndexes.push(index); },

@@ -2,6 +2,7 @@ import type { SummaryProvider, SummaryResult, TranscriptSegment } from "@videoan
 import { alignChapter, type AlignedChapter } from "./alignment.js";
 import { estimateTranscriptTokens, chooseSummaryPlan } from "./token-budget.js";
 import { createSummaryWindows } from "./windowing.js";
+import { requireStageUpdate } from "../analysis/stage-fence.js";
 
 export type AlignedChapterResult = SummaryResult["chapters"][number] & AlignedChapter;
 export type AlignedSummaryResult = {
@@ -12,13 +13,14 @@ export type AlignedSummaryResult = {
 
 type TranscriptState = {
   getTranscript(runId: string): Promise<{ duration: number; segments: TranscriptSegment[] }>;
-  setStage(runId: string, stage: string, progress?: number): Promise<void>;
+  setStage(runId: string, stage: string, progress?: number): Promise<boolean>;
   saveSummary(runId: string, result: AlignedSummaryResult): Promise<void>;
 };
 
 export function createV1SummaryRunner(dependencies: { summary: SummaryProvider; state: TranscriptState }) {
   return {
     async run(input: { runId: string }) {
+      await requireStageUpdate(() => dependencies.state.setStage(input.runId, "summarizing", 0.1));
       const transcript = await dependencies.state.getTranscript(input.runId);
       // Models strip the runId prefix off long segment ids and cite the suffix
       // (they returned "seg_1" for "<runId>_seg_1"), which breaks alignment.
@@ -33,8 +35,6 @@ export function createV1SummaryRunner(dependencies: { summary: SummaryProvider; 
 
       const capabilities = await dependencies.summary.capabilities();
       const plan = chooseSummaryPlan({ estimatedInputTokens: estimateTranscriptTokens(compactSegments), contextWindow: capabilities.contextWindow, segmentCount: compactSegments.length });
-      await dependencies.state.setStage(input.runId, "summarizing", 0.1);
-
       const result = plan === "single"
         ? await summarizeWithRetry(dependencies.summary, { videoDuration: compactTranscript.duration, segments: compactSegments })
         : await summarizeMapReduce(dependencies.summary, compactTranscript);
@@ -48,7 +48,7 @@ export function createV1SummaryRunner(dependencies: { summary: SummaryProvider; 
 
       const persisted = withRealSegmentIds(aligned, byCompactId);
       await dependencies.state.saveSummary(input.runId, persisted);
-      await dependencies.state.setStage(input.runId, "indexing", 0.95);
+      await requireStageUpdate(() => dependencies.state.setStage(input.runId, "indexing", 0.95));
       return persisted;
     }
   };

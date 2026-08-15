@@ -2,6 +2,7 @@ import { dirname, join } from "node:path";
 import type { AsrProvider } from "@videoanalyze/domain";
 import { mergeChunkTranscripts } from "./transcript-merge.js";
 import { AnalysisCancelledError, cancellationOutcome } from "./cancellation.js";
+import { requireStageUpdate } from "./stage-fence.js";
 
 type ChunkState = {
   index: number;
@@ -14,7 +15,7 @@ type ChunkState = {
 type RunnerState = {
   getRun(runId: string): Promise<{ inputVideoPath: string; audioPath: string; duration: number }>;
   getChunks(runId: string): Promise<ChunkState[]>;
-  setStage(runId: string, stage: string, progress?: number): Promise<void>;
+  setStage(runId: string, stage: string, progress?: number): Promise<boolean>;
   markChunkProcessing(runId: string, index: number): Promise<void>;
   saveChunkTranscript(runId: string, index: number, transcript: Array<{ start: number; end: number; text: string }>): Promise<void>;
   markChunkCompleted(runId: string, index: number): Promise<void>;
@@ -32,16 +33,16 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
     async run(input: { userId: string; videoId: string; runId: string; signal: AbortSignal }): Promise<void> {
       let processingStarted = false;
       await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
-      await dependencies.state.setStage(input.runId, "probing", 0.02);
+      await requireStageUpdate(() => dependencies.state.setStage(input.runId, "probing", 0.02));
       const run = await dependencies.state.getRun(input.runId);
       await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
-      await dependencies.state.setStage(input.runId, "extracting_audio", 0.1);
+      await requireStageUpdate(() => dependencies.state.setStage(input.runId, "extracting_audio", 0.1));
       await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
       await dependencies.media.extractAudio(run.inputVideoPath, run.audioPath, 0, input.signal);
       processingStarted = true;
 
+      await requireStageUpdate(() => dependencies.state.setStage(input.runId, "transcribing", 0.2));
       const chunks = await dependencies.state.getChunks(input.runId);
-      await dependencies.state.setStage(input.runId, "transcribing", 0.2);
       const completedTranscripts: Array<{ start: number; end: number; segments: Array<{ start: number; end: number; text: string }> }> = [];
 
       for (const chunk of chunks) {
@@ -63,7 +64,7 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
       await dependencies.state.saveTranscript(input.runId, merged.segments, merged.mergeWarnings);
       // Do not mark the run completed here: the orchestrator (worker-main) runs
       // the optional v1 summary before the run is finalized.
-      await dependencies.state.setStage(input.runId, "merging_transcript", 0.95);
+      await requireStageUpdate(() => dependencies.state.setStage(input.runId, "merging_transcript", 0.95));
     }
   };
 }

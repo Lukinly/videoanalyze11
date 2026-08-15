@@ -57,14 +57,15 @@ describe("retention repository claims", () => {
     expect(queryParams(client, 1)).toEqual([now, input.runCreatedBefore, input.heartbeatBefore, input.error]);
   });
 
-  it("claims held reservations left by stale-failure commits for reconciliation", async () => {
+  it("claims held stale-timeout reservations by a stable failure kind after error text changes", async () => {
     const client = scriptedClient([result(), result([{ runId: "run_stale" }]), result()]);
     const repository = createRetentionRepository(poolWith(client));
     await expect(repository.claimStaleFailureReservations(now)).resolves.toEqual(["run_stale"]);
     const sql = queryText(client, 1);
     expect(sql).toContain("credit_reservations reservation");
     expect(sql).toContain("reservation.status = 'held'");
-    expect(sql).toContain("run.error = 'analysis run failed after missing its heartbeat'");
+    expect(sql).toContain("run.failure_kind = 'stale_timeout'");
+    expect(sql).not.toContain("run.error");
     expect(sql).toContain("FOR UPDATE OF reservation SKIP LOCKED");
   });
 

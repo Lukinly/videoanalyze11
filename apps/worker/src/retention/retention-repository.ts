@@ -117,7 +117,7 @@ export function createRetentionRepository(pool: Pool): RetentionSweepRepository 
              LIMIT ${claimLimit}
            )
            UPDATE analysis_runs run
-           SET status = 'failed', error = $4, updated_at = $1
+           SET status = 'failed', error = $4, failure_kind = 'stale_timeout', updated_at = $1
            FROM claimed
            WHERE run.id = claimed.id
            RETURNING run.id AS "runId"`,
@@ -135,7 +135,7 @@ export function createRetentionRepository(pool: Pool): RetentionSweepRepository 
            JOIN analysis_runs run ON run.id = reservation.run_id
            WHERE reservation.status = 'held'
              AND run.status = 'failed'
-             AND run.error = 'analysis run failed after missing its heartbeat'
+             AND run.failure_kind = 'stale_timeout'
            ORDER BY reservation.created_at, reservation.run_id
            FOR UPDATE OF reservation SKIP LOCKED
            LIMIT ${claimLimit}`

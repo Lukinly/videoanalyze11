@@ -14,7 +14,7 @@ describe("v1 summary runner", () => {
         duration: 100,
         segments: [{ id: "s1", runId: "r1", start: 10, end: 20, text: "内容" }]
       }),
-      setStage: vi.fn(),
+      setStage: vi.fn().mockResolvedValue(true),
       saveSummary: vi.fn()
     };
     const runner = createV1SummaryRunner({ summary, state });
@@ -30,5 +30,23 @@ describe("v1 summary runner", () => {
     expect(state.saveSummary).toHaveBeenCalledWith("r1", expect.objectContaining({
       chapters: [expect.objectContaining({ start: 10, end: 20, alignmentWarning: false, sourceSegmentIds: ["s1"] })]
     }));
+  });
+
+  it("does not call the summary provider after the run loses its stage fence", async () => {
+    const summary = {
+      capabilities: vi.fn().mockResolvedValue({ contextWindow: 10_000, structuredOutput: true }),
+      summarize: vi.fn()
+    };
+    const state = {
+      getTranscript: vi.fn().mockResolvedValue({ duration: 100, segments: [] }),
+      setStage: vi.fn().mockResolvedValue(false),
+      saveSummary: vi.fn()
+    };
+    const runner = createV1SummaryRunner({ summary, state });
+
+    await expect(runner.run({ runId: "r1" })).rejects.toThrow("analysis run is no longer writable");
+
+    expect(summary.capabilities).not.toHaveBeenCalled();
+    expect(summary.summarize).not.toHaveBeenCalled();
   });
 });

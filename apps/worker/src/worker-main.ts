@@ -27,6 +27,7 @@ import {
 import { runRetentionSweep, sanitizeCleanupError } from "./retention/cleanup-worker.js";
 import { createRetentionRepository } from "./retention/retention-repository.js";
 import { startRetentionScheduler } from "./retention/retention-scheduler.js";
+import { AnalysisRunNotWritableError } from "./analysis/stage-fence.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -91,6 +92,7 @@ const consumer = createAnalysisConsumer({
             try {
               await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
             } catch (summaryError) {
+              if (summaryError instanceof AnalysisRunNotWritableError) throw summaryError;
               // Summary is a P1 enhancement; a failure must not discard the transcript.
               console.error("summary generation failed", job.runId, summaryError);
             }
@@ -207,7 +209,7 @@ function createDatabaseState(input: {
       return this.getChunks(runId);
     },
     async setStage(runId: string, stage: string, progress = 0) {
-      await updateStage(runId, stage, progress);
+      return updateStage(runId, stage, progress);
     },
     async markCompleted(runId: string) {
       return updateStage(runId, "completed", 1);

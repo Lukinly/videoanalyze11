@@ -37,6 +37,7 @@ export const analysisRuns = pgTable("analysis_runs", {
   progress: real("progress").notNull().default(0),
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   error: text("error"),
+  failureKind: text("failure_kind"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   displayName: text("display_name").notNull().default(""),

@@ -34,7 +34,7 @@ const migrationStatements = [
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
     stage TEXT NOT NULL DEFAULT 'queued', status TEXT NOT NULL DEFAULT 'queued',
-    progress REAL NOT NULL DEFAULT 0, heartbeat_at TIMESTAMPTZ, error TEXT,
+    progress REAL NOT NULL DEFAULT 0, heartbeat_at TIMESTAMPTZ, error TEXT, failure_kind TEXT,
     summary_json JSONB, display_name TEXT NOT NULL DEFAULT '',
     retention_mode TEXT NOT NULL DEFAULT 'standard' CHECK (retention_mode IN ('standard', 'privacy')),
     result_expires_at TIMESTAMPTZ, results_deleted_at TIMESTAMPTZ,
