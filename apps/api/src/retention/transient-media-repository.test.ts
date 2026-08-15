@@ -87,7 +87,8 @@ async function createUser(id: string) {
 function createTestCapacityGate() {
   let tail = Promise.resolve();
   return {
-    async acquire(_client: PoolClient): Promise<() => void> {
+    async acquire(client: PoolClient): Promise<() => void> {
+      void client;
       const previous = tail;
       let release: () => void = () => {};
       tail = new Promise<void>((resolve) => { release = resolve; });
