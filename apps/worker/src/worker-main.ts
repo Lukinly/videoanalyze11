@@ -24,6 +24,9 @@ import {
   runAnalysisToTerminal,
   validatedRunDirectory
 } from "./retention/media-cleanup.js";
+import { runRetentionSweep, sanitizeCleanupError } from "./retention/cleanup-worker.js";
+import { createRetentionRepository } from "./retention/retention-repository.js";
+import { startRetentionScheduler } from "./retention/retention-scheduler.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -36,6 +39,7 @@ const env = {
   s3AccessKey: process.env.S3_ACCESS_KEY ?? "minioadmin",
   s3SecretKey: process.env.S3_SECRET_KEY ?? "minioadmin",
   concurrency: Number(process.env.GLOBAL_WORKER_CONCURRENCY ?? 2),
+  retentionSweepIntervalSeconds: Number(process.env.RETENTION_SWEEP_INTERVAL_SECONDS ?? 900),
   // V1 summary uses a separate LLM (chat completions, Anthropic-compatible
   // endpoint). Read lowercase names first so the .env sample works verbatim.
   llmApiKey: process.env.LLM_API_KEY ?? process.env.llm_api_key ?? "",
@@ -56,7 +60,22 @@ const summaryProvider = env.llmApiKey && env.llmApiBaseUrl && env.llmApiModel
 const credits = createWorkerCreditRepository(pool);
 const results = createResultStore(pool);
 const mediaCleanup = createMediaCleanupRepository(pool);
+const retention = createRetentionRepository(pool);
 const clock = { now: () => new Date() };
+const storageDeleter = {
+  async delete(objectKey: string) {
+    await withSanitizedCleanupError(() => s3.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: objectKey })));
+  }
+};
+
+const cleanupTerminalRun = (runId: string, now: Date) => cleanupRunMedia({
+  runId,
+  storage: storageDeleter,
+  repository: mediaCleanup,
+  now,
+  leaseDurationMs: 5 * 60 * 1000,
+  removeLocalMedia: () => withSanitizedCleanupError(() => removeValidatedRunDirectory(runId))
+});
 
 const consumer = createAnalysisConsumer({
   connection: redisConnectionFromUrl(env.redisUrl),
@@ -89,25 +108,36 @@ const consumer = createAnalysisConsumer({
         },
         settleSuccess: () => settleAnalysisSuccess({ runId: job.runId, credits }),
         settleFailure: (error) => settleAnalysisFailure({ runId: job.runId, error, credits }),
-        cleanupMedia: () => cleanupRunMedia({
-          runId: job.runId,
-          storage: {
-            async delete(objectKey) {
-              await s3.send(new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: objectKey }));
-            }
-          },
-          repository: mediaCleanup,
-          now: clock.now(),
-          leaseDurationMs: 5 * 60 * 1000,
-          removeLocalMedia: () => removeValidatedRunDirectory(job.runId)
-        })
+        cleanupMedia: () => cleanupTerminalRun(job.runId, clock.now())
       });
     }
   }
 });
 
-process.once("SIGTERM", async () => { await consumer.close(); await pool.end(); });
-process.once("SIGINT", async () => { await consumer.close(); await pool.end(); });
+const retentionScheduler = startRetentionScheduler({
+  clock,
+  intervalMs: validRetentionSweepIntervalMs(env.retentionSweepIntervalSeconds),
+  sweep: ({ now }) => runRetentionSweep({
+    now,
+    repository: retention,
+    storage: storageDeleter,
+    cleanupTerminalRun,
+    credits
+  })
+});
+
+let shutdownPromise: Promise<void> | null = null;
+const shutdown = () => {
+  shutdownPromise ??= (async () => {
+    await retentionScheduler.close();
+    await consumer.close();
+    await pool.end();
+  })();
+  return shutdownPromise;
+};
+
+process.once("SIGTERM", () => { void shutdown(); });
+process.once("SIGINT", () => { void shutdown(); });
 
 function createDatabaseState(input: {
   pool: Pool;
@@ -220,4 +250,23 @@ async function downloadObject(client: S3Client, bucket: string, key: string, des
 function redisConnectionFromUrl(redisUrl: string) {
   const parsed = new URL(redisUrl);
   return { host: parsed.hostname, port: Number(parsed.port || 6379), password: parsed.password || undefined, tls: parsed.protocol === "rediss:" ? {} : undefined };
+}
+
+function validRetentionSweepIntervalMs(seconds: number): number {
+  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds * 1000 : 900_000;
+}
+
+async function withSanitizedCleanupError<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const sanitized = new Error(sanitizeCleanupError(error));
+    if (typeof error === "object" && error !== null) {
+      const source = error as { code?: unknown; name?: unknown; $metadata?: unknown };
+      if (source.code !== undefined) Object.assign(sanitized, { code: source.code });
+      if (source.name !== undefined) sanitized.name = String(source.name);
+      if (source.$metadata !== undefined) Object.assign(sanitized, { $metadata: source.$metadata });
+    }
+    throw sanitized;
+  }
 }
