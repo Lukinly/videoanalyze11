@@ -251,7 +251,11 @@ function isMissingObjectError(error: unknown): boolean {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "media cleanup failed";
+  const message = error instanceof Error ? error.message : "media cleanup failed";
+  return Array.from(message, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127 ? " " : character;
+  }).join("").trim().slice(0, 500) || "media cleanup failed";
 }
 
 function isTerminalAnalysisStatus(status: string): boolean {

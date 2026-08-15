@@ -8,6 +8,10 @@ export type ResultStore = {
   saveSummary(input: { runId: string; userId: string; mode: RetentionMode; expiresAt: Date | null; result: AlignedSummaryResult }): Promise<void>;
   finalizePrivacyExpiry(runId: string, expiresAt: Date): Promise<void>;
   clearChunkPayloads(runId: string): Promise<void>;
+  saveChunkTranscript(runId: string, index: number, transcript: unknown): Promise<void>;
+  markChunkProcessing(runId: string, index: number): Promise<void>;
+  markChunkCompleted(runId: string, index: number): Promise<void>;
+  updateStage(runId: string, stage: string, progress: number, now: Date): Promise<boolean>;
 };
 
 export function privacyResultExpiry(completedAt: Date): Date {
@@ -28,6 +32,7 @@ export function createResultStore(pool: Pool): ResultStore {
     async saveTranscript(input) {
       const segments = transcriptSegmentSchema.array().parse(input.segments);
       await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, input.runId, input.mode);
         await client.query("DELETE FROM transcript_segments WHERE run_id = $1", [input.runId]);
         await client.query("DELETE FROM ephemeral_transcript_segments WHERE run_id = $1", [input.runId]);
         const table = input.mode === "privacy" ? "ephemeral_transcript_segments" : "transcript_segments";
@@ -69,6 +74,7 @@ export function createResultStore(pool: Pool): ResultStore {
 
     async saveSummary(input) {
       await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, input.runId, input.mode);
         await client.query("DELETE FROM chapters WHERE run_id = $1", [input.runId]);
         await client.query("DELETE FROM ephemeral_chapters WHERE run_id = $1", [input.runId]);
         await client.query("DELETE FROM ephemeral_run_summaries WHERE run_id = $1", [input.runId]);
@@ -104,6 +110,7 @@ export function createResultStore(pool: Pool): ResultStore {
 
     async finalizePrivacyExpiry(runId, expiresAt) {
       await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, runId, "privacy");
         await client.query("UPDATE analysis_runs SET result_expires_at = $2 WHERE id = $1 AND retention_mode = 'privacy'", [runId, expiresAt]);
         await client.query("UPDATE ephemeral_transcript_segments SET expires_at = $2 WHERE run_id = $1", [runId, expiresAt]);
         await client.query("UPDATE ephemeral_run_summaries SET expires_at = $2 WHERE run_id = $1", [runId, expiresAt]);
@@ -111,8 +118,57 @@ export function createResultStore(pool: Pool): ResultStore {
       });
     },
 
-    clearChunkPayloads
+    clearChunkPayloads,
+
+    async saveChunkTranscript(runId, index, transcript) {
+      await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, runId);
+        const result = await client.query(
+          "UPDATE chunks SET transcript_json = $3 WHERE run_id = $1 AND chunk_index = $2",
+          [runId, index, JSON.stringify(transcript)]
+        );
+        if (result.rowCount !== 1) throw new Error("analysis chunk does not exist");
+      });
+    },
+
+    async markChunkProcessing(runId, index) {
+      await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, runId);
+        await client.query("UPDATE chunks SET status = 'processing', retry_count = retry_count + 1 WHERE run_id = $1 AND chunk_index = $2", [runId, index]);
+      });
+    },
+
+    async markChunkCompleted(runId, index) {
+      await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, runId);
+        await client.query("UPDATE chunks SET status = 'completed' WHERE run_id = $1 AND chunk_index = $2", [runId, index]);
+      });
+    },
+
+    async updateStage(runId, stage, progress, now) {
+      const result = await pool.query<{ status: string }>(
+        `UPDATE analysis_runs SET stage = $2, progress = $3,
+           status = CASE WHEN $2 = 'completed' THEN 'completed' WHEN status = 'queued' THEN 'running' ELSE status END,
+           heartbeat_at = $4, updated_at = $4
+         WHERE id = $1 AND status IN ('queued', 'running') AND results_deleted_at IS NULL
+         RETURNING status`,
+        [runId, stage, progress, now]
+      );
+      return result.rowCount === 1 && (stage !== "completed" || result.rows[0]?.status === "completed");
+    }
   };
+}
+
+async function assertWritableRun(client: PoolClient, runId: string, expectedMode?: RetentionMode): Promise<void> {
+  const result = await client.query<{ status: string; mode: RetentionMode; resultsDeletedAt: Date | null }>(
+    `SELECT status, retention_mode AS mode, results_deleted_at AS "resultsDeletedAt"
+     FROM analysis_runs WHERE id = $1 FOR UPDATE`,
+    [runId]
+  );
+  const run = result.rows[0];
+  if (!run || !["queued", "running"].includes(run.status) || run.resultsDeletedAt || (expectedMode && run.mode !== expectedMode)) {
+    throw new Error("analysis run is not writable");
+  }
 }
 
 async function inTransaction(pool: Pool, operation: (client: PoolClient) => Promise<void>): Promise<void> {

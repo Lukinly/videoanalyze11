@@ -175,6 +175,18 @@ describe("validated local media cleanup", () => {
   });
 });
 
+it("sanitizes and truncates completion-write failures before recording cleanup metadata", async () => {
+  const repository = {
+    claimRunMedia: vi.fn().mockResolvedValue({ status: "cleaning", claimed: true, objectKey: "original.mp4" }),
+    completeRunMediaCleanup: vi.fn().mockRejectedValue(new Error(`db\n${"x".repeat(700)}`)),
+    recordCleanupRetry: vi.fn().mockResolvedValue(undefined)
+  };
+  await cleanupRunMedia({ runId: "run_error", storage: { delete: vi.fn() }, repository, now, removeLocalMedia: vi.fn() });
+  const error = repository.recordCleanupRetry.mock.calls[0]?.[0].error as string;
+  expect(error).toHaveLength(500);
+  expect(error).not.toContain("\n");
+});
+
 async function seedCompletedRun() {
   await pool.query(
     `INSERT INTO videos (id, object_key, status, updated_at)

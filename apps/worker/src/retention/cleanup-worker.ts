@@ -23,12 +23,12 @@ export type RetentionSweepReport = {
   staleRunsFailed: number;
 };
 
-type ClaimedTransientObject = ExpiredObject & { id: string; videoId: string | null };
+type ClaimedTransientObject = ExpiredObject & { id: string; videoId: string | null; claimToken: string };
 
 export type RetentionSweepRepository = {
   claimExpiredTransientObjects(now: Date): Promise<ClaimedTransientObject[]>;
-  markTransientObjectDeleted(input: { objectId: string; videoId: string | null; now: Date }): Promise<void>;
-  recordTransientObjectRetry(input: { objectId: string; error: string }): Promise<void>;
+  markTransientObjectDeleted(input: { objectId: string; videoId: string | null; claimToken: string; now: Date }): Promise<void>;
+  recordTransientObjectRetry(input: { objectId: string; claimToken: string; error: string; now: Date }): Promise<void>;
   claimTerminalCleanupRuns(now: Date): Promise<string[]>;
   failStaleRuns(input: {
     now: Date;
@@ -36,6 +36,7 @@ export type RetentionSweepRepository = {
     heartbeatBefore: Date;
     error: string;
   }): Promise<string[]>;
+  claimStaleFailureReservations(now: Date): Promise<string[]>;
   deleteExpiredPrivacyResults(now: Date): Promise<number>;
 };
 
@@ -69,6 +70,7 @@ export async function runRetentionSweep(input: {
   storage: StorageDeleter;
   cleanupTerminalRun(runId: string, now: Date): Promise<TerminalCleanupResult>;
   credits: CreditSettlement;
+  onError?: (error: unknown) => void;
 }): Promise<RetentionSweepReport> {
   const report: RetentionSweepReport = {
     transientDeleted: 0,
@@ -88,13 +90,14 @@ export async function runRetentionSweep(input: {
           markObjectDeleted: async () => input.repository.markTransientObjectDeleted({
             objectId: object.id,
             videoId: object.videoId,
+            claimToken: object.claimToken,
             now: input.now
           })
         }
       });
       report.transientDeleted += 1;
     } catch (error) {
-      await input.repository.recordTransientObjectRetry({ objectId: object.id, error: sanitizeCleanupError(error) });
+      await input.repository.recordTransientObjectRetry({ objectId: object.id, claimToken: object.claimToken, error: sanitizeCleanupError(error), now: input.now });
       report.transientRetried += 1;
     }
   }
@@ -111,9 +114,18 @@ export async function runRetentionSweep(input: {
     heartbeatBefore: new Date(input.now.getTime() - 15 * 60 * 1000),
     error: staleError
   });
+  report.staleRunsFailed += staleRunIds.length;
+
+  const reconciliationRunIds = await input.repository.claimStaleFailureReservations(input.now);
+  for (const runId of reconciliationRunIds) {
+    try {
+      await settleAnalysisFailure({ runId, error: new Error(staleError), credits: input.credits });
+    } catch (error) {
+      (input.onError ?? ((failure: unknown) => console.error("stale reservation reconciliation failed", failure)))(error);
+    }
+  }
+
   for (const runId of staleRunIds) {
-    await settleAnalysisFailure({ runId, error: new Error(staleError), credits: input.credits });
-    report.staleRunsFailed += 1;
     recordTerminalCleanup(report, await input.cleanupTerminalRun(runId, input.now));
   }
 

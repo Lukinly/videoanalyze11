@@ -7,14 +7,14 @@ describe("retention sweep", () => {
   it("deletes an expired abandoned upload and records its metadata once", async () => {
     const repository = repositoryDouble({
       claimExpiredTransientObjects: vi.fn().mockResolvedValue([
-        { id: "object_1", key: "users/u1/videos/v1/original.mp4", kind: "original", videoId: "video_1" }
+        { id: "object_1", key: "users/u1/videos/v1/original.mp4", kind: "original", videoId: "video_1", claimToken: "token_1" }
       ])
     });
     const storage = { delete: vi.fn().mockResolvedValue(undefined) };
     const report = await runRetentionSweep({ now, repository, storage, cleanupTerminalRun: vi.fn(), credits: creditsDouble() });
     expect(report).toEqual({ transientDeleted: 1, transientRetried: 0, privacyResultsDeleted: 0, staleRunsFailed: 0 });
     expect(storage.delete).toHaveBeenCalledWith("users/u1/videos/v1/original.mp4");
-    expect(repository.markTransientObjectDeleted).toHaveBeenCalledWith({ objectId: "object_1", videoId: "video_1", now });
+    expect(repository.markTransientObjectDeleted).toHaveBeenCalledWith({ objectId: "object_1", videoId: "video_1", claimToken: "token_1", now });
   });
 
   it("retries terminal media cleanup through the existing terminal cleanup path", async () => {
@@ -26,7 +26,10 @@ describe("retention sweep", () => {
   });
 
   it("marks stale runs failed, releases reservations idempotently, and cleans their media", async () => {
-    const repository = repositoryDouble({ failStaleRuns: vi.fn().mockResolvedValue(["run_stale"]) });
+    const repository = repositoryDouble({
+      failStaleRuns: vi.fn().mockResolvedValue(["run_stale"]),
+      claimStaleFailureReservations: vi.fn().mockResolvedValue(["run_stale"])
+    });
     const credits = creditsDouble();
     const cleanupTerminalRun = vi.fn().mockResolvedValue({ status: "complete" });
     const report = await runRetentionSweep({ now, repository, storage: storageDouble(), cleanupTerminalRun, credits });
@@ -51,7 +54,7 @@ describe("retention sweep", () => {
   it("is idempotent when a repeated sweep has no remaining claims", async () => {
     const repository = repositoryDouble({
       claimExpiredTransientObjects: vi.fn()
-        .mockResolvedValueOnce([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1" }])
+        .mockResolvedValueOnce([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1", claimToken: "token_1" }])
         .mockResolvedValueOnce([]),
       deleteExpiredPrivacyResults: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0)
     });
@@ -66,7 +69,7 @@ describe("retention sweep", () => {
 
   it("stores at most 500 sanitized characters when transient deletion fails", async () => {
     const repository = repositoryDouble({
-      claimExpiredTransientObjects: vi.fn().mockResolvedValue([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1" }])
+      claimExpiredTransientObjects: vi.fn().mockResolvedValue([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1", claimToken: "token_1" }])
     });
     const storage = { delete: vi.fn().mockRejectedValue(new Error(`provider\nsecret\u0000${"x".repeat(700)}`)) };
     const report = await runRetentionSweep({ now, repository, storage, cleanupTerminalRun: vi.fn(), credits: creditsDouble() });
@@ -78,6 +81,27 @@ describe("retention sweep", () => {
       return codePoint > 31 && codePoint !== 127;
     })).toBe(true);
   });
+
+  it("reconciles every held stale-failure reservation and retries a failed release next sweep", async () => {
+    const repository = repositoryDouble({
+      claimStaleFailureReservations: vi.fn()
+        .mockResolvedValueOnce(["run_1", "run_2"])
+        .mockResolvedValueOnce(["run_1"])
+    });
+    const credits = creditsDouble();
+    vi.mocked(credits.releaseReservation)
+      .mockRejectedValueOnce(new Error("credits unavailable"))
+      .mockResolvedValue(undefined);
+    const onError = vi.fn();
+
+    await runRetentionSweep({ now, repository, storage: storageDouble(), cleanupTerminalRun: vi.fn(), credits, onError });
+    await runRetentionSweep({ now, repository, storage: storageDouble(), cleanupTerminalRun: vi.fn(), credits, onError });
+
+    expect(credits.releaseReservation.mock.calls).toEqual([
+      ["run_1", "analysis_failed"], ["run_2", "analysis_failed"], ["run_1", "analysis_failed"]
+    ]);
+    expect(onError).toHaveBeenCalledOnce();
+  });
 });
 
 function repositoryDouble(overrides: Record<string, unknown> = {}) {
@@ -87,6 +111,7 @@ function repositoryDouble(overrides: Record<string, unknown> = {}) {
     recordTransientObjectRetry: vi.fn().mockResolvedValue(undefined),
     claimTerminalCleanupRuns: vi.fn().mockResolvedValue([]),
     failStaleRuns: vi.fn().mockResolvedValue([]),
+    claimStaleFailureReservations: vi.fn().mockResolvedValue([]),
     deleteExpiredPrivacyResults: vi.fn().mockResolvedValue(0),
     ...overrides
   };

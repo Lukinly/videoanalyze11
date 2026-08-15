@@ -6,16 +6,31 @@ const now = new Date("2026-08-15T12:00:00.000Z");
 
 describe("retention repository claims", () => {
   it("claims expired abandoned uploads with row locks that skip concurrent sweep claims", async () => {
-    const client = scriptedClient([result(), result([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1" }]), result()]);
+    const client = scriptedClient([result(), result([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1", claimToken: "token_1" }]), result()]);
     const repository = createRetentionRepository(poolWith(client));
-    await expect(repository.claimExpiredTransientObjects(now)).resolves.toEqual([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1" }]);
+    await expect(repository.claimExpiredTransientObjects(now)).resolves.toEqual([{ id: "object_1", key: "orphan.mp4", kind: "original", videoId: "video_1", claimToken: "token_1" }]);
     const claim = queryText(client, 1);
+    expect(claim).toContain("UPDATE transient_objects");
+    expect(claim).toContain("cleanup_status = 'cleaning'");
+    expect(claim).toContain("cleanup_lease_expires_at <= $1");
+    expect(claim).toContain("cleanup_claim_token");
     expect(claim).toContain("FOR UPDATE SKIP LOCKED");
     expect(claim).toContain("deleted_at IS NULL");
     expect(claim).toContain("expires_at <= $1");
     expect(claim).toContain("run_id IS NULL");
     expect(claim).toContain("linked.video_id = transient.video_id");
-    expect(queryParams(client, 1)).toEqual([now]);
+    expect(queryParams(client, 1)).toEqual([now, new Date("2026-08-15T12:05:00.000Z"), expect.any(String)]);
+  });
+
+  it("fences transient completion and retry metadata with the durable claim token", async () => {
+    const client = scriptedClient([result(), result([], 0), result()]);
+    const repository = createRetentionRepository(poolWith(client));
+
+    await repository.markTransientObjectDeleted({ objectId: "object_1", videoId: "video_1", claimToken: "old_token", now });
+
+    expect(queryText(client, 1)).toContain("cleanup_claim_token = $3");
+    expect(queryText(client, 1)).toContain("cleanup_status = 'cleaning'");
+    expect(vi.mocked(client.query)).toHaveBeenCalledTimes(3);
   });
 
   it("claims terminal cleanup retries without selecting active runs", async () => {
@@ -36,10 +51,21 @@ describe("retention repository claims", () => {
     await expect(repository.failStaleRuns(input)).resolves.toEqual(["run_stale"]);
     const claim = queryText(client, 1);
     expect(claim).toContain("FOR UPDATE SKIP LOCKED");
-    expect(claim).toContain("created_at <= $2");
-    expect(claim).toContain("COALESCE(heartbeat_at, created_at) <= $3");
+    expect(claim).toContain("created_at < $2");
+    expect(claim).toContain("COALESCE(heartbeat_at, created_at) < $3");
     expect(claim).toContain("status IN ('queued', 'running', 'cancelling')");
     expect(queryParams(client, 1)).toEqual([now, input.runCreatedBefore, input.heartbeatBefore, input.error]);
+  });
+
+  it("claims held reservations left by stale-failure commits for reconciliation", async () => {
+    const client = scriptedClient([result(), result([{ runId: "run_stale" }]), result()]);
+    const repository = createRetentionRepository(poolWith(client));
+    await expect(repository.claimStaleFailureReservations(now)).resolves.toEqual(["run_stale"]);
+    const sql = queryText(client, 1);
+    expect(sql).toContain("credit_reservations reservation");
+    expect(sql).toContain("reservation.status = 'held'");
+    expect(sql).toContain("run.error = 'analysis run failed after missing its heartbeat'");
+    expect(sql).toContain("FOR UPDATE OF reservation SKIP LOCKED");
   });
 
   it("protects a stale-created run with a fresh heartbeat", async () => {

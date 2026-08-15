@@ -101,7 +101,7 @@ const consumer = createAnalysisConsumer({
           const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
           const result = await pool.query<{ status: string }>(
             `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
-             WHERE id = $1 AND status <> 'completed' RETURNING status`,
+             WHERE id = $1 AND status IN ('queued', 'running', 'cancelling') RETURNING status`,
             [job.runId, status, error instanceof Error ? error.message : "analysis failed", clock.now()]
           );
           return result.rowCount === 1 && result.rows[0]?.status === status;
@@ -167,14 +167,7 @@ function createDatabaseState(input: {
         await input.results.finalizePrivacyExpiry(runId, privacyResultExpiry(updatedAt));
       }
     }
-    const updated = await input.pool.query<{ status: string }>(
-      `UPDATE analysis_runs SET stage = $2, progress = $3,
-         status = CASE WHEN $2 = 'completed' THEN 'completed' WHEN status = 'queued' THEN 'running' ELSE status END,
-         heartbeat_at = $4, updated_at = $4 WHERE id = $1 RETURNING status`,
-      [runId, stage, progress, updatedAt]
-    );
-    if (updated.rowCount !== 1) return false;
-    return stage !== "completed" || updated.rows[0]?.status === "completed";
+    return input.results.updateStage(runId, stage, progress, updatedAt);
   }
 
   return {
@@ -223,9 +216,9 @@ function createDatabaseState(input: {
       const result = await input.pool.query<{ status: string }>("SELECT status FROM analysis_runs WHERE id = $1", [runId]);
       return result.rows[0]?.status === "cancelling";
     },
-    async markChunkProcessing(runId: string, index: number) { await input.pool.query("UPDATE chunks SET status = 'processing', retry_count = retry_count + 1 WHERE run_id = $1 AND chunk_index = $2", [runId, index]); },
-    async saveChunkTranscript(runId: string, index: number, transcript: Array<{ start: number; end: number; text: string }>) { await input.pool.query("UPDATE chunks SET transcript_json = $3 WHERE run_id = $1 AND chunk_index = $2", [runId, index, JSON.stringify(transcript)]); },
-    async markChunkCompleted(runId: string, index: number) { await input.pool.query("UPDATE chunks SET status = 'completed' WHERE run_id = $1 AND chunk_index = $2", [runId, index]); },
+    async markChunkProcessing(runId: string, index: number) { await input.results.markChunkProcessing(runId, index); },
+    async saveChunkTranscript(runId: string, index: number, transcript: Array<{ start: number; end: number; text: string }>) { await input.results.saveChunkTranscript(runId, index, transcript); },
+    async markChunkCompleted(runId: string, index: number) { await input.results.markChunkCompleted(runId, index); },
     async saveTranscript(runId: string, segments: unknown[], mergeWarnings: string[]) {
       const context = await getResultContext(runId);
       await input.results.saveTranscript({ runId, userId: context.userId, mode: context.mode, expiresAt: context.expiresAt, segments: segments as TranscriptSegment[] });

@@ -59,7 +59,9 @@ const migrationStatements = [
     video_id TEXT REFERENCES videos(id) ON DELETE CASCADE, run_id TEXT REFERENCES analysis_runs(id) ON DELETE CASCADE,
     object_key TEXT NOT NULL UNIQUE, kind TEXT NOT NULL CHECK (kind IN ('original', 'audio', 'chunk', 'temporary_result')),
     size_bytes BIGINT NOT NULL DEFAULT 0, expires_at TIMESTAMPTZ NOT NULL, deleted_at TIMESTAMPTZ,
-    cleanup_attempts INTEGER NOT NULL DEFAULT 0, last_cleanup_error TEXT, created_at TIMESTAMPTZ NOT NULL
+    cleanup_attempts INTEGER NOT NULL DEFAULT 0, last_cleanup_error TEXT,
+    cleanup_status TEXT NOT NULL DEFAULT 'pending', cleanup_lease_expires_at TIMESTAMPTZ,
+    cleanup_claim_token TEXT, created_at TIMESTAMPTZ NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS ephemeral_transcript_segments (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -96,7 +96,7 @@ describe("result store", () => {
 
     for (const table of ["analysis_runs", "ephemeral_transcript_segments", "ephemeral_run_summaries", "ephemeral_chapters"]) {
       const column = table === "analysis_runs" ? "result_expires_at" : "expires_at";
-      const rows = await pool.query<{ expiresAt: Date }>(`SELECT ${column} AS \"expiresAt\" FROM ${table} WHERE ${table === "analysis_runs" ? "id" : "run_id"} = $1`, ["privacy_run"]);
+      const rows = await pool.query<{ expiresAt: Date }>(`SELECT ${column} AS "expiresAt" FROM ${table} WHERE ${table === "analysis_runs" ? "id" : "run_id"} = $1`, ["privacy_run"]);
       expect(rows.rows.length).toBeGreaterThan(0);
       expect(rows.rows.every((row) => row.expiresAt.toISOString() === "2026-08-16T03:04:05.678Z")).toBe(true);
     }
@@ -144,6 +144,41 @@ describe("result store", () => {
     expect(stored.rows).toEqual([{ oneLineSummary: "replacement" }]);
     expect(await count("ephemeral_chapters", "privacy_run")).toBe(1);
   });
+
+  it("rejects transcript, summary, and chunk writes after privacy expiry without resurrecting bodies", async () => {
+    const { createResultStore } = await import("./result-store.js");
+    await createRun("privacy_run", "privacy");
+    const store = createResultStore(pool);
+    await pool.query("UPDATE analysis_runs SET status = 'completed', results_deleted_at = $2 WHERE id = $1", ["privacy_run", new Date()]);
+    await insertContentBearingChunk("privacy_run");
+    await pool.query("UPDATE chunks SET transcript_json = NULL, transcript_object_key = NULL, error = NULL WHERE run_id = 'privacy_run'");
+
+    await expect(store.saveTranscript({ runId: "privacy_run", userId: "user_1", mode: "privacy", expiresAt: null, segments })).rejects.toThrow("not writable");
+    await expect(store.saveSummary({ runId: "privacy_run", userId: "user_1", mode: "privacy", expiresAt: null, result: summary })).rejects.toThrow("not writable");
+    await expect(store.saveChunkTranscript("privacy_run", 0, [{ text: "late body" }])).rejects.toThrow("not writable");
+    expect(await count("ephemeral_transcript_segments", "privacy_run")).toBe(0);
+    expect(await count("ephemeral_run_summaries", "privacy_run")).toBe(0);
+    expect(await chunkPayload("privacy_run")).toEqual({ transcriptJson: null, transcriptObjectKey: null, error: null });
+  });
+
+  it("rejects result writes after a stale run is failed and refunded", async () => {
+    const { createResultStore } = await import("./result-store.js");
+    await createRun("standard_run", "standard");
+    await pool.query("UPDATE analysis_runs SET status = 'failed' WHERE id = 'standard_run'");
+    const store = createResultStore(pool);
+    await expect(store.saveTranscript({ runId: "standard_run", userId: "user_1", mode: "standard", expiresAt: null, segments })).rejects.toThrow("not writable");
+    expect(await count("transcript_segments", "standard_run")).toBe(0);
+  });
+
+  it("cannot transition a sweep-failed refunded run back to completed", async () => {
+    const { createResultStore } = await import("./result-store.js");
+    await createRun("standard_run", "standard");
+    await pool.query("UPDATE analysis_runs SET status = 'failed' WHERE id = 'standard_run'");
+    const store = createResultStore(pool);
+    await expect(store.updateStage("standard_run", "completed", 1, new Date())).resolves.toBe(false);
+    const run = await pool.query<{ status: string }>("SELECT status FROM analysis_runs WHERE id = 'standard_run'");
+    expect(run.rows[0]?.status).toBe("failed");
+  });
 });
 
 const segments: TranscriptSegment[] = [
@@ -170,7 +205,7 @@ async function createRun(runId: string, mode: "standard" | "privacy") {
   await pool.query("INSERT INTO users (id) VALUES ('user_1') ON CONFLICT (id) DO NOTHING");
   await pool.query("INSERT INTO videos (id, user_id, duration) VALUES ('video_1', 'user_1', 9) ON CONFLICT (id) DO NOTHING");
   await pool.query(
-    "INSERT INTO analysis_runs (id, user_id, video_id, retention_mode, summary_json) VALUES ($1, 'user_1', 'video_1', $2, NULL)",
+    "INSERT INTO analysis_runs (id, user_id, video_id, retention_mode, summary_json, status) VALUES ($1, 'user_1', 'video_1', $2, NULL, 'running')",
     [runId, mode]
   );
 }
@@ -182,8 +217,8 @@ async function count(table: string, runId: string): Promise<number> {
 
 async function insertContentBearingChunk(runId: string) {
   await pool.query(
-    `INSERT INTO chunks (id, user_id, run_id, transcript_json, transcript_object_key, error)
-     VALUES ('chunk_1', 'user_1', $1, $2, 'private/transcript.json', 'provider echoed sensitive chunk body')`,
+    `INSERT INTO chunks (id, user_id, run_id, chunk_index, transcript_json, transcript_object_key, error)
+     VALUES ('chunk_1', 'user_1', $1, 0, $2, 'private/transcript.json', 'provider echoed sensitive chunk body')`,
     [runId, JSON.stringify([{ text: "sensitive chunk body" }])]
   );
 }
@@ -202,7 +237,9 @@ const schema = [
   "CREATE TABLE videos (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, duration REAL)",
   `CREATE TABLE analysis_runs (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, video_id TEXT NOT NULL, retention_mode TEXT NOT NULL,
-    summary_json JSONB, result_expires_at TIMESTAMPTZ
+    summary_json JSONB, result_expires_at TIMESTAMPTZ, results_deleted_at TIMESTAMPTZ, status TEXT NOT NULL,
+    stage TEXT NOT NULL DEFAULT 'queued', progress REAL NOT NULL DEFAULT 0, heartbeat_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ
   )`,
   `CREATE TABLE transcript_segments (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, run_id TEXT NOT NULL,
@@ -229,6 +266,7 @@ const schema = [
   )`,
   `CREATE TABLE chunks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, run_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0,
     transcript_json JSONB, transcript_object_key TEXT, error TEXT
   )`
 ];

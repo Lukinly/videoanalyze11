@@ -61,6 +61,9 @@ export const transientObjects = pgTable("transient_objects", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
   lastCleanupError: text("last_cleanup_error"),
+  cleanupStatus: text("cleanup_status").notNull().default("pending"),
+  cleanupLeaseExpiresAt: timestamp("cleanup_lease_expires_at", { withTimezone: true }),
+  cleanupClaimToken: text("cleanup_claim_token"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
 }, (table) => ({
   objectKeyUnique: uniqueIndex("transient_objects_object_key_unique").on(table.objectKey),

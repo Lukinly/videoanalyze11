@@ -14,4 +14,11 @@ describe("database migrations", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS ephemeral_run_summaries");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS ephemeral_chapters");
   });
+
+  it("adds durable transient cleanup leases", async () => {
+    const sql = await readFile(join(migrations, "0006_retention_cleanup_leases.sql"), "utf8");
+    expect(sql).toContain("cleanup_status");
+    expect(sql).toContain("cleanup_lease_expires_at");
+    expect(sql).toContain("cleanup_claim_token");
+  });
 });
