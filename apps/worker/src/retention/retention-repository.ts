@@ -163,6 +163,7 @@ export function createRetentionRepository(pool: Pool): RetentionSweepRepository 
         await client.query("DELETE FROM ephemeral_transcript_segments WHERE run_id = ANY($1::text[])", [runIds]);
         await client.query("DELETE FROM ephemeral_run_summaries WHERE run_id = ANY($1::text[])", [runIds]);
         await client.query("DELETE FROM ephemeral_chapters WHERE run_id = ANY($1::text[])", [runIds]);
+        await client.query("DELETE FROM ephemeral_ai_notes WHERE run_id = ANY($1::text[])", [runIds]);
         await client.query(
           `UPDATE chunks
            SET transcript_json = NULL, transcript_object_key = NULL, error = NULL

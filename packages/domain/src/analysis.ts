@@ -8,6 +8,7 @@ export const analysisStageSchema = z.enum([
   "transcribing",
   "merging_transcript",
   "summarizing",
+  "generating_notes",
   "indexing",
   "completed"
 ]);

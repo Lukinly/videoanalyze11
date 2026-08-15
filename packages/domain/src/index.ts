@@ -1,4 +1,5 @@
 export * from "./analysis.js";
+export * from "./ai-notes.js";
 export * from "./auth.js";
 export * from "./billing.js";
 export * from "./errors.js";

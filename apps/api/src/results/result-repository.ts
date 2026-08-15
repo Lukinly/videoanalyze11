@@ -5,12 +5,15 @@ export type ResultMetadata = {
   id: string; userId: string; videoId: string; stage: string; status: string; progress: number; error: string | null;
   fileName: string; retentionMode: RetentionMode; resultExpiresAt: Date | null; resultsDeletedAt: Date | null;
   duration: number | null; originalDeletedAt: Date | null; billedCredits: number | null; createdAt: Date; updatedAt: Date;
+  billingRuleVersion: string | null; billedDurationSeconds: number | null; billedMinutes: number | null; reservedCredits: number | null;
 };
 
 const metadataSelect = `SELECT run.id, run.user_id AS "userId", run.video_id AS "videoId",
   run.stage, run.status, run.progress, run.error, run.display_name AS "fileName",
   run.retention_mode AS "retentionMode", run.result_expires_at AS "resultExpiresAt",
   run.results_deleted_at AS "resultsDeletedAt", run.created_at AS "createdAt", run.updated_at AS "updatedAt",
+  run.billing_rule_version AS "billingRuleVersion", run.billed_duration_seconds AS "billedDurationSeconds",
+  run.billed_minutes AS "billedMinutes", run.reserved_credits AS "reservedCredits",
   video.duration, video.original_deleted_at AS "originalDeletedAt",
   CASE WHEN reservation.status = 'consumed' THEN reservation.amount::int ELSE NULL END AS "billedCredits"
  FROM analysis_runs run JOIN videos video ON video.id = run.video_id
@@ -39,6 +42,8 @@ export function createResultRepository(pool: Pool) {
         ? await pool.query<{ oneLineSummary: string; overallSummary: string }>(`SELECT one_line_summary AS "oneLineSummary", overall_summary AS "overallSummary" FROM ephemeral_run_summaries WHERE run_id = $1 AND user_id = $2`, [runId, userId])
         : await pool.query<{ summaryJson: { oneLineSummary?: string; overallSummary?: string } | null }>(`SELECT summary_json AS "summaryJson" FROM analysis_runs WHERE id = $1 AND user_id = $2`, [runId, userId]);
       const summaryJson = mode === "privacy" ? summary.rows[0] as { oneLineSummary?: string; overallSummary?: string } | undefined : (summary.rows[0] as { summaryJson?: { oneLineSummary?: string; overallSummary?: string } | null } | undefined)?.summaryJson ?? undefined;
+      const noteTable = mode === "privacy" ? "ephemeral_ai_notes" : "ai_notes";
+      const noteResult = await pool.query<{ notes: unknown }>(`SELECT notes_json AS notes FROM ${noteTable} WHERE run_id = $1 AND user_id = $2`, [runId, userId]);
       return {
         ...(segments.rows.length ? { transcript: { segments: segments.rows.map((segment) => ({ ...segment, runId })), mergeWarnings: [] } } : {}),
         ...(summaryJson || chapters.rows.length ? { summary: {
@@ -46,7 +51,8 @@ export function createResultRepository(pool: Pool) {
           chapters: chapters.rows.map((chapter) => ({ id: chapter.id, title: chapter.title, start: chapter.start, end: chapter.end,
             summary: chapter.summary, bullets: (chapter.bulletsJson ?? []) as Array<{ text: string; sourceSegmentIds: string[] }>,
             sourceSegmentIds: (chapter.sourceSegmentIdsJson ?? []) as string[], alignmentWarning: chapter.alignmentWarning }))
-        } } : {})
+        } } : {}),
+        ...(noteResult.rows[0]?.notes ? { notes: noteResult.rows[0].notes } : {})
       };
     },
     async deleteOwnedResults(userId: string, runId: string, now: Date): Promise<boolean> {
@@ -54,7 +60,7 @@ export function createResultRepository(pool: Pool) {
         const owned = await client.query<{ videoId: string }>(`SELECT video_id AS "videoId" FROM analysis_runs WHERE id = $1 AND user_id = $2 FOR UPDATE`, [runId, userId]);
         const run = owned.rows[0];
         if (!run) return false;
-        for (const table of ["transcript_segments", "chapters", "ephemeral_transcript_segments", "ephemeral_run_summaries", "ephemeral_chapters"]) await client.query(`DELETE FROM ${table} WHERE run_id = $1`, [runId]);
+        for (const table of ["transcript_segments", "chapters", "ai_notes", "ephemeral_transcript_segments", "ephemeral_run_summaries", "ephemeral_chapters", "ephemeral_ai_notes"]) await client.query(`DELETE FROM ${table} WHERE run_id = $1`, [runId]);
         await client.query("UPDATE chunks SET transcript_json = NULL, transcript_object_key = NULL, error = NULL WHERE run_id = $1", [runId]);
         await client.query(`UPDATE analysis_runs SET summary_json = NULL, results_deleted_at = COALESCE(results_deleted_at, $3), display_name = '已删除的视频', updated_at = $3 WHERE id = $1 AND user_id = $2`, [runId, userId, now]);
         const labels = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM analysis_runs WHERE video_id = $1 AND id <> $2 AND results_deleted_at IS NULL AND status = 'completed' AND (retention_mode = 'standard' OR result_expires_at > $3)`, [run.videoId, runId, now]);

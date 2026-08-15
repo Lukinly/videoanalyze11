@@ -12,6 +12,7 @@ import { createMediaProcessor } from "./media/media-processor.js";
 import { createGroqAsrProvider } from "./providers/groq-asr.js";
 import { createAnthropicSummaryProvider } from "./providers/anthropic-summary.js";
 import { createV1SummaryRunner } from "./summary/v1-runner.js";
+import { createNotesRunner } from "./notes/notes-runner.js";
 import type { RetentionMode, TranscriptSegment } from "@videoanalyze/domain";
 import { createWorkerCreditRepository } from "./credits/credit-repository.js";
 import { AnalysisCancelledError } from "./analysis/cancellation.js";
@@ -27,7 +28,6 @@ import {
 import { runRetentionSweep, sanitizeCleanupError } from "./retention/cleanup-worker.js";
 import { createRetentionRepository } from "./retention/retention-repository.js";
 import { startRetentionScheduler } from "./retention/retention-scheduler.js";
-import { AnalysisRunNotWritableError } from "./analysis/stage-fence.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -88,15 +88,9 @@ const consumer = createAnalysisConsumer({
       await runAnalysisToTerminal({
         async runAndPersist() {
           await createV0AnalysisRunner({ asr, media, state }).run(job);
-          if (summaryProvider) {
-            try {
-              await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
-            } catch (summaryError) {
-              if (summaryError instanceof AnalysisRunNotWritableError) throw summaryError;
-              // Summary is a P1 enhancement; a failure must not discard the transcript.
-              console.error("summary generation failed", job.runId, summaryError);
-            }
-          }
+          if (!summaryProvider) throw new Error("summary and AI notes provider is required");
+          await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
+          await createNotesRunner({ notes: summaryProvider, state }).run({ runId: job.runId });
         },
         markCompleted: () => state.markCompleted(job.runId),
         async markFailedOrCancelled(error) {
@@ -239,6 +233,10 @@ function createDatabaseState(input: {
     async saveSummary(runId: string, result: Parameters<ResultStore["saveSummary"]>[0]["result"]) {
       const context = await getResultContext(runId);
       await input.results.saveSummary({ runId, userId: context.userId, mode: context.mode, expiresAt: context.expiresAt, result });
+    },
+    async saveNotes(runId: string, notes: Parameters<ResultStore["saveNotes"]>[0]["notes"]) {
+      const context = await getResultContext(runId);
+      await input.results.saveNotes({ runId, userId: context.userId, mode: context.mode, expiresAt: context.expiresAt, notes });
     }
   };
 }

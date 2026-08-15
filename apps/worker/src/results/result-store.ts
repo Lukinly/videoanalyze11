@@ -1,11 +1,12 @@
 import type { Pool, PoolClient } from "pg";
-import { transcriptSegmentSchema, type RetentionMode, type TranscriptSegment } from "@videoanalyze/domain";
+import { aiNotesSchema, transcriptSegmentSchema, type AiNotes, type RetentionMode, type TranscriptSegment } from "@videoanalyze/domain";
 import type { AlignedSummaryResult } from "../summary/v1-runner.js";
 
 export type ResultStore = {
   saveTranscript(input: { runId: string; userId: string; mode: RetentionMode; expiresAt: Date | null; segments: TranscriptSegment[] }): Promise<void>;
   getTranscript(runId: string): Promise<{ duration: number; segments: TranscriptSegment[] }>;
   saveSummary(input: { runId: string; userId: string; mode: RetentionMode; expiresAt: Date | null; result: AlignedSummaryResult }): Promise<void>;
+  saveNotes(input: { runId: string; userId: string; mode: RetentionMode; expiresAt: Date | null; notes: AiNotes }): Promise<void>;
   finalizePrivacyExpiry(runId: string, expiresAt: Date): Promise<void>;
   clearChunkPayloads(runId: string): Promise<void>;
   saveChunkTranscript(runId: string, index: number, transcript: unknown): Promise<void>;
@@ -108,6 +109,26 @@ export function createResultStore(pool: Pool): ResultStore {
       });
     },
 
+    async saveNotes(input) {
+      const notes = aiNotesSchema.parse(input.notes);
+      await inTransaction(pool, async (client) => {
+        await assertWritableRun(client, input.runId, input.mode);
+        await client.query("DELETE FROM ai_notes WHERE run_id = $1", [input.runId]);
+        await client.query("DELETE FROM ephemeral_ai_notes WHERE run_id = $1", [input.runId]);
+        if (input.mode === "privacy") {
+          await client.query(
+            "INSERT INTO ephemeral_ai_notes (run_id, user_id, notes_json, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)",
+            [input.runId, input.userId, JSON.stringify(notes), input.expiresAt, new Date()]
+          );
+        } else {
+          await client.query(
+            "INSERT INTO ai_notes (run_id, user_id, notes_json, created_at) VALUES ($1, $2, $3, $4)",
+            [input.runId, input.userId, JSON.stringify(notes), new Date()]
+          );
+        }
+      });
+    },
+
     async finalizePrivacyExpiry(runId, expiresAt) {
       await inTransaction(pool, async (client) => {
         await assertWritableRun(client, runId, "privacy");
@@ -115,6 +136,7 @@ export function createResultStore(pool: Pool): ResultStore {
         await client.query("UPDATE ephemeral_transcript_segments SET expires_at = $2 WHERE run_id = $1", [runId, expiresAt]);
         await client.query("UPDATE ephemeral_run_summaries SET expires_at = $2 WHERE run_id = $1", [runId, expiresAt]);
         await client.query("UPDATE ephemeral_chapters SET expires_at = $2 WHERE run_id = $1", [runId, expiresAt]);
+        await client.query("UPDATE ephemeral_ai_notes SET expires_at = $2 WHERE run_id = $1", [runId, expiresAt]);
       });
     },
 

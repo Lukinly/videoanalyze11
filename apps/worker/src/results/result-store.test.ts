@@ -15,6 +15,8 @@ describe("result store", () => {
 
   beforeEach(async () => {
     await pool.query("DELETE FROM chunks");
+    await pool.query("DELETE FROM ephemeral_ai_notes");
+    await pool.query("DELETE FROM ai_notes");
     await pool.query("DELETE FROM ephemeral_chapters");
     await pool.query("DELETE FROM ephemeral_run_summaries");
     await pool.query("DELETE FROM ephemeral_transcript_segments");
@@ -82,6 +84,18 @@ describe("result store", () => {
     expect(await count("chapters", "standard_run")).toBe(summary.chapters.length);
     expect(await count("ephemeral_run_summaries", "standard_run")).toBe(0);
     expect(await count("ephemeral_chapters", "standard_run")).toBe(0);
+  });
+
+  it.each(["standard", "privacy"] as const)("routes %s AI notes to only the matching storage class", async (mode) => {
+    const { createResultStore } = await import("./result-store.js");
+    const runId = `${mode}_run`;
+    await createRun(runId, mode);
+    const store = createResultStore(pool);
+
+    await store.saveNotes({ runId, userId: "user_1", mode, expiresAt: null, notes });
+
+    expect(await count("ai_notes", runId)).toBe(mode === "standard" ? 1 : 0);
+    expect(await count("ephemeral_ai_notes", runId)).toBe(mode === "privacy" ? 1 : 0);
   });
 
   it("sets one exact privacy expiry on the run and every ephemeral result row", async () => {
@@ -201,6 +215,11 @@ const summary: AlignedSummaryResult = {
   }]
 };
 
+const notes = {
+  title: "Detailed notes", topic: "Topic", coreIdeas: ["Idea"], reviewPoints: ["Review"],
+  sections: [{ id: "s1", level: 1 as const, title: "Section", body: "Body", citations: [{ segmentId: "privacy_run_seg_1", timestampSeconds: 0 }] }]
+};
+
 async function createRun(runId: string, mode: "standard" | "privacy") {
   await pool.query("INSERT INTO users (id) VALUES ('user_1') ON CONFLICT (id) DO NOTHING");
   await pool.query("INSERT INTO videos (id, user_id, duration) VALUES ('video_1', 'user_1', 9) ON CONFLICT (id) DO NOTHING");
@@ -264,6 +283,8 @@ const schema = [
     bullets_json JSONB NOT NULL, source_segment_ids_json JSONB NOT NULL,
     alignment_warning BOOLEAN NOT NULL, expires_at TIMESTAMPTZ
   )`,
+  "CREATE TABLE ai_notes (run_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, notes_json JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL)",
+  "CREATE TABLE ephemeral_ai_notes (run_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, notes_json JSONB NOT NULL, expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL)",
   `CREATE TABLE chunks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, run_id TEXT NOT NULL,
     chunk_index INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0,

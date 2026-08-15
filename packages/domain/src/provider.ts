@@ -40,6 +40,11 @@ export interface SummaryProvider {
   summarize(input: SummaryInput): Promise<import("./summary.js").SummaryResult>;
 }
 
+export interface AiNotesProvider {
+  capabilities(): Promise<SummaryCapabilities>;
+  generateNotes(input: SummaryInput): Promise<import("./ai-notes.js").AiNotes>;
+}
+
 export type ProviderFailureKind =
   | "rate_limited"
   | "server_error"

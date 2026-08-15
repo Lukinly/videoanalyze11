@@ -79,7 +79,7 @@ describe("retention repository claims", () => {
 
 describe("privacy expiry deletion", () => {
   it("deletes all ephemeral bodies, clears chunk payloads, and marks the run in one transaction", async () => {
-    const client = scriptedClient([result(), result([{ runId: "privacy_run" }]), result([], 2), result([], 1), result([], 3), result([], 4), result([], 1), result()]);
+    const client = scriptedClient([result(), result([{ runId: "privacy_run" }]), result([], 2), result([], 1), result([], 3), result([], 1), result([], 4), result([], 1), result()]);
     const repository = createRetentionRepository(poolWith(client));
     await expect(repository.deleteExpiredPrivacyResults(now)).resolves.toBe(1);
     const statements = vi.mocked(client.query).mock.calls.map(([sql]) => String(sql));
@@ -92,6 +92,7 @@ describe("privacy expiry deletion", () => {
       expect.stringContaining("DELETE FROM ephemeral_transcript_segments"),
       expect.stringContaining("DELETE FROM ephemeral_run_summaries"),
       expect.stringContaining("DELETE FROM ephemeral_chapters"),
+      expect.stringContaining("DELETE FROM ephemeral_ai_notes"),
       expect.stringContaining("UPDATE chunks"),
       expect.stringContaining("results_deleted_at = $2")
     ]));
@@ -99,7 +100,7 @@ describe("privacy expiry deletion", () => {
   });
 
   it("never selects from or deletes ordinary result tables during privacy expiry", async () => {
-    const client = scriptedClient([result(), result([{ runId: "privacy_run" }]), result(), result(), result(), result(), result(), result()]);
+    const client = scriptedClient([result(), result([{ runId: "privacy_run" }]), result(), result(), result(), result(), result(), result(), result()]);
     const repository = createRetentionRepository(poolWith(client));
     await repository.deleteExpiredPrivacyResults(now);
     const sql = vi.mocked(client.query).mock.calls.map(([statement]) => String(statement)).join("\n");

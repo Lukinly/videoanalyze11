@@ -52,4 +52,21 @@ describe("anthropic-compatible summary provider", () => {
 
     await expect(provider.summarize({ videoDuration: 1, segments: [] })).rejects.toMatchObject({ code: "unauthorized" });
   });
+
+  it("generates structured AI notes through the same messages endpoint", async () => {
+    const { createAnthropicSummaryProvider } = await import("./anthropic-summary.js");
+    const notes = {
+      title: "测试笔记",
+      topic: "主题",
+      coreIdeas: ["核心观点"],
+      sections: [{ id: "section-1", level: 1, title: "第一节", body: "内容", citations: [{ segmentId: "seg_1", timestampSeconds: 0 }] }],
+      reviewPoints: ["复习要点"]
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(notes) }] }), { status: 200 }));
+    const provider = createAnthropicSummaryProvider({ apiKey: "test-key", baseUrl: "https://api.deepseek.com/anthropic", model: "m", fetchImpl });
+
+    await expect(provider.generateNotes({ videoDuration: 20, segments: [{ id: "seg_1", runId: "r", start: 0, end: 20, text: "t" }] })).resolves.toEqual(notes);
+    const body = JSON.parse((fetchImpl.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.system).toContain("study notes");
+  });
 });
