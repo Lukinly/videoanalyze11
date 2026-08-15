@@ -1,4 +1,4 @@
-import type { AnalysisStage, AnalysisStatus, ResultAvailability, RetentionMode, TranscriptSegment } from "@videoanalyze/domain";
+import type { AiNotes, AnalysisStage, AnalysisStatus, ResultAvailability, RetentionMode, TranscriptSegment } from "@videoanalyze/domain";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -12,6 +12,7 @@ export type PublicUser = {
 };
 
 export type CreditBalance = { ledgerBalance: number; held: number; available: number };
+export type BillingStatus = "pending_duration_probe" | "reserved" | "consumed" | "released";
 export type CreditLedgerEntry = { id: string; userId: string; amount: number; type: string; referenceId: string | null; reason: string; createdAt: string };
 export type CreditTopupRequest = { id: string; userId?: string; userEmail?: string | null; requestedAmount: number; note: string; status: "pending" | "approved" | "rejected"; reviewNote?: string | null; createdAt?: string; reviewedAt?: string | null };
 export type AdminUser = PublicUser & CreditBalance;
@@ -23,6 +24,10 @@ export type AnalysisRun = {
   status: AnalysisStatus | string;
   stage: AnalysisStage | string;
   estimatedCost?: number;
+  billingStatus?: BillingStatus;
+  billedDurationSeconds?: number | null;
+  billingTierVersion?: string | null;
+  reservedCredits?: number | null;
   progress?: number;
   completedChunks?: number;
   totalChunks?: number;
@@ -38,6 +43,7 @@ export type AnalysisRun = {
     overallSummary: string;
     chapters: Array<{ id: string; title: string; sourceSegmentIds: string[]; summary: string; bullets: Array<{ text: string; sourceSegmentIds: string[] }>; start?: number; end?: number; alignmentWarning?: boolean }>;
   };
+  notes?: AiNotes;
 };
 
 export type SearchResult = {

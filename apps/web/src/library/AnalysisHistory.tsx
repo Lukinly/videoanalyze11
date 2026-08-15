@@ -5,7 +5,7 @@ export function AnalysisHistory({ items }: { items: AnalysisRun[] }) {
     <div className="section-heading"><div><p className="eyebrow">Analysis history</p><h2>最近分析</h2></div></div>
     {items.length === 0 ? <p className="history-empty">还没有分析记录。</p> : <ul className="history-list">
       {items.map((item) => <li key={item.id}>
-        <a href={`/?run=${encodeURIComponent(item.id)}`}>
+        <a href={`${item.status === "completed" && item.resultAvailability !== "expired" && item.resultAvailability !== "deleted" ? "/notes" : "/"}?run=${encodeURIComponent(item.id)}`}>
           <span><strong>{item.fileName ?? "未命名视频"}</strong><small>{availabilityLabel(item)}</small></span>
           <span aria-hidden="true">→</span>
         </a>

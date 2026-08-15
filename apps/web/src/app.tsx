@@ -11,6 +11,7 @@ import { Brand } from "./brand/Brand";
 import { WatchingWorkspace } from "./viewing/WatchingWorkspace";
 import { AccountPage } from "./account/AccountPage";
 import { AnalysisHistory } from "./library/AnalysisHistory";
+import { NotesPage } from "./notes/NotesPage";
 
 export function App() {
   const [user, setUser] = useState<PublicUser | null>(null);
@@ -71,6 +72,7 @@ export function App() {
   const logout = () => { void api.logout().finally(() => { setUser(null); setVideo(null); setRun(null); setCredits(null); }); };
   if (user.role === "admin" && window.location.pathname === "/admin") return <AdminPage />;
   if (window.location.pathname === "/account") return <AccountPage user={user} onLogout={logout} />;
+  if (window.location.pathname === "/notes" && run && video) return <NotesPage run={run} playbackUrl={video.playbackUrl} playerRef={playerRef} onAttach={(url, fileName) => setVideo((current) => current ? { ...current, playbackUrl: url, fileName } : current)} />;
 
   async function handleUploaded(uploaded: UploadedVideo) {
     setVideo(uploaded);
