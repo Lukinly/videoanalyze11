@@ -15,11 +15,14 @@ import { registerAdminRoutes } from "./routes/admin.js";
 import type { createCreditRepository } from "./db/repositories/credits.js";
 import type { createAdminRepository } from "./db/repositories/admin.js";
 import type { createUserRepository } from "./db/repositories/users.js";
+import { registerResultRoutes } from "./routes/results.js";
+import type { ResultService } from "./results/result-service.js";
 
 export function buildApp(dependencies: {
   authService: AuthServiceContract;
   uploadService?: { start(input: { userId: string; fileName: string; contentType: string; contentLength: number }): Promise<unknown> };
   analysisService?: AnalysisServiceContract;
+  resultService?: ResultService;
   progressHub?: ReturnType<typeof createProgressHub>;
   readinessChecks?: ReadinessChecks;
   searchService?: SearchService;
@@ -54,7 +57,10 @@ export function buildApp(dependencies: {
     app.register(async (instance) => registerUploadRoutes(instance, { authService: dependencies.authService, uploadService: dependencies.uploadService! }));
   }
   if (dependencies.analysisService) {
-    app.register(async (instance) => registerAnalysisRoutes(instance, { authService: dependencies.authService, analysisService: dependencies.analysisService!, progressHub: dependencies.progressHub ?? createProgressHub() }));
+    app.register(async (instance) => registerAnalysisRoutes(instance, { authService: dependencies.authService, analysisService: dependencies.analysisService!, progressHub: dependencies.progressHub ?? createProgressHub(), registerDetailRoute: !dependencies.resultService }));
+  }
+  if (dependencies.resultService) {
+    app.register(async (instance) => registerResultRoutes(instance, { authService: dependencies.authService, resultService: dependencies.resultService! }));
   }
   if (dependencies.searchService) {
     app.register(async (instance) => registerSearchRoutes(instance, { authService: dependencies.authService, searchService: dependencies.searchService! }));

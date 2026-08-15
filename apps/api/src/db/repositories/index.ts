@@ -8,6 +8,7 @@ import { createSearchRepository } from "./search.js";
 import { createCreditRepository } from "./credits.js";
 import { createAdminRepository } from "./admin.js";
 import { createTransientMediaRepository } from "../../retention/transient-media-repository.js";
+import { createResultRepository } from "../../results/result-repository.js";
 
 export function createRepositories(pool: Pool, options: { transientCapacityBytes?: number } = {}) {
   return {
@@ -19,6 +20,7 @@ export function createRepositories(pool: Pool, options: { transientCapacityBytes
     auth: createAuthRepository(pool),
     runs: createAnalysisRunRepository(pool),
     search: createSearchRepository(pool),
+    results: createResultRepository(pool),
     transientMedia: createTransientMediaRepository(pool, { capacityBytes: options.transientCapacityBytes })
   };
 }

@@ -9,6 +9,7 @@ export type VideoRecord = {
   fileSize: number;
   duration: number | null;
   status: string;
+  originalDeletedAt: Date | null;
 };
 
 export function createVideoRepository(pool: Pool) {
@@ -19,7 +20,7 @@ export function createVideoRepository(pool: Pool) {
         `INSERT INTO videos (id, user_id, object_key, file_name, file_size, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $6)
          RETURNING id, user_id AS "userId", object_key AS "objectKey", file_name AS "fileName",
-           file_size::bigint AS "fileSize", duration, status`,
+           file_size::bigint AS "fileSize", duration, status, original_deleted_at AS "originalDeletedAt"`,
         [input.id ?? randomUUID(), input.userId, input.objectKey, input.fileName, input.fileSize ?? 0, now]
       );
       return result.rows[0];
@@ -27,7 +28,7 @@ export function createVideoRepository(pool: Pool) {
     async findOwnedById(userId: string, videoId: string): Promise<VideoRecord | null> {
       const result = await pool.query<VideoRecord>(
         `SELECT id, user_id AS "userId", object_key AS "objectKey", file_name AS "fileName",
-           file_size::bigint AS "fileSize", duration, status
+           file_size::bigint AS "fileSize", duration, status, original_deleted_at AS "originalDeletedAt"
          FROM videos WHERE id = $1 AND user_id = $2 AND status <> 'deleted'`,
         [videoId, userId]
       );

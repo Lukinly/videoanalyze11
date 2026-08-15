@@ -10,7 +10,8 @@ import { createSearchService } from "./search/search-service.js";
 import { createS3Client } from "./storage/s3-client.js";
 import { createS3ObjectStorage } from "./storage/s3-storage.js";
 import { createUploadService } from "./storage/upload-service.js";
-import { DomainError } from "@videoanalyze/domain";
+import { createResultService } from "./results/result-service.js";
+import { createMediaService } from "./routes/media.js";
 
 const env = parseEnv();
 const { pool } = createDatabase(env.databaseUrl);
@@ -65,23 +66,19 @@ const authService = createAuthService({
 });
 const redisConnection = redisConnectionFromUrl(env.redisUrl);
 const queue = new Queue("video-analysis", { connection: redisConnection });
+const resultService = createResultService({ repository: repositories.results });
 const app = buildApp({
   authService,
   secureCookies: env.nodeEnv === "production",
   uploadService: createUploadService({ transientMedia: repositories.transientMedia, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds, transientCapacityBytes: env.transientCapacityBytes }),
   analysisService: createAnalysisService({ videos: repositories.videos, credits: repositories.credits, runs: repositories.runs, queue }),
+  resultService,
   credits: repositories.credits,
   topups: repositories.admin,
   users: repositories.users,
   adminRepository: repositories.admin,
-  searchService: createSearchService({ search: repositories.search }),
-  mediaService: {
-    async getPlaybackUrl(input) {
-      const video = await repositories.videos.findOwnedById(input.userId, input.videoId);
-      if (!video) throw new DomainError("NOT_FOUND", "video not found", 404);
-      return storage.getDownloadUrl(video.objectKey, 900);
-    }
-  },
+  searchService: createSearchService({ search: repositories.search, availability: resultService }),
+  mediaService: createMediaService({ videos: repositories.videos, storage }),
   videoDeletion: { videos: repositories.videos, storage },
   readinessChecks: {
     database: async () => { await pool.query("SELECT 1"); },

@@ -81,4 +81,17 @@ describe("analysis run repository", () => {
       chapters: [{ id: "ch1", title: "开场", start: 0, end: 5, sourceSegmentIds: ["run_results_seg_1"], alignmentWarning: true }]
     });
   });
+
+  it("does not assemble expired privacy bodies while cleanup is pending", async () => {
+    const user = await repositories.users.create({ email: "expired@example.com", passwordHash: "hash" });
+    const video = await repositories.videos.create({ userId: user.id, objectKey: "users/expired/video", fileName: "video.mp4" });
+    const run = await repositories.runs.create({ id: "run_expired", userId: user.id, videoId: video.id, retentionMode: "privacy" });
+    await pool.query("UPDATE analysis_runs SET status = 'completed', stage = 'completed', result_expires_at = $2 WHERE id = $1", [run.id, new Date("2026-08-14T00:00:00.000Z")]);
+    await pool.query("INSERT INTO ephemeral_transcript_segments (id,user_id,run_id,start_seconds,end_seconds,text) VALUES ('private_seg',$1,$2,0,1,'must not load')", [user.id, run.id]);
+
+    const result = await repositories.runs.findOwnedById(user.id, run.id);
+
+    expect(result).toMatchObject({ id: run.id, status: "completed" });
+    expect(result?.transcript).toBeUndefined();
+  });
 });

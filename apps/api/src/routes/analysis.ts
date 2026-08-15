@@ -13,7 +13,7 @@ type ProgressHub = {
   subscribe(runId: string, subscriber: (event: ProgressEvent) => void): () => void;
 };
 
-export async function registerAnalysisRoutes(app: FastifyInstance, dependencies: { authService: AuthServiceContract; analysisService: AnalysisServiceContract; progressHub: ProgressHub }) {
+export async function registerAnalysisRoutes(app: FastifyInstance, dependencies: { authService: AuthServiceContract; analysisService: AnalysisServiceContract; progressHub: ProgressHub; registerDetailRoute?: boolean }) {
   app.post<{ Params: { videoId: string }; Body: { retentionMode?: unknown } }>("/api/videos/:videoId/analysis-runs", async (request, reply) => {
     const userId = await authenticatedUserId(request, dependencies.authService);
     if (!userId) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
@@ -24,11 +24,13 @@ export async function registerAnalysisRoutes(app: FastifyInstance, dependencies:
     return reply.code(202).send(await dependencies.analysisService.start({ userId, videoId: request.params.videoId, retentionMode: retentionMode.data }));
   });
 
-  app.get<{ Params: { runId: string } }>("/api/analysis-runs/:runId", async (request, reply) => {
-    const userId = await authenticatedUserId(request, dependencies.authService);
-    if (!userId) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
-    return reply.send(await dependencies.analysisService.get({ userId, runId: request.params.runId }));
-  });
+  if (dependencies.registerDetailRoute !== false) {
+    app.get<{ Params: { runId: string } }>("/api/analysis-runs/:runId", async (request, reply) => {
+      const userId = await authenticatedUserId(request, dependencies.authService);
+      if (!userId) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
+      return reply.send(await dependencies.analysisService.get({ userId, runId: request.params.runId }));
+    });
+  }
 
   app.post<{ Params: { runId: string } }>("/api/analysis-runs/:runId/cancel", async (request, reply) => {
     const userId = await authenticatedUserId(request, dependencies.authService);

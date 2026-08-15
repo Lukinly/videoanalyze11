@@ -85,6 +85,7 @@ const migrationStatements = [
     run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL, start_seconds REAL NOT NULL, end_seconds REAL NOT NULL,
     object_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    transcript_json JSONB, transcript_object_key TEXT, error TEXT,
     UNIQUE (run_id, chunk_index)
   )`,
   `CREATE TABLE IF NOT EXISTS usage_ledger (

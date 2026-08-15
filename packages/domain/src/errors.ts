@@ -21,7 +21,9 @@ export type DomainErrorCode =
   | "TEMP_STORAGE_FULL"
   | "NO_AUDIO_TRACK"
   | "UNSUPPORTED_MEDIA"
-  | "ANALYSIS_CONFLICT";
+  | "ANALYSIS_CONFLICT"
+  | "RESULT_EXPIRED"
+  | "ORIGINAL_DELETED";
 
 export class DomainError extends Error {
   constructor(readonly code: DomainErrorCode, message: string, readonly status = 400) {

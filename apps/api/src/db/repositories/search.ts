@@ -15,6 +15,14 @@ export function createSearchRepository(pool: Pool) {
          SELECT 'chapter' AS "sourceType", id AS "sourceId", title || ': ' || summary AS text, start_seconds AS start, end_seconds AS end
          FROM chapters
          WHERE user_id = $1 AND run_id = $4 AND ${chapterPredicate}
+         UNION ALL
+         SELECT 'transcript' AS "sourceType", id AS "sourceId", text, start_seconds AS start, end_seconds AS end
+         FROM ephemeral_transcript_segments
+         WHERE user_id = $1 AND run_id = $4 AND ${transcriptPredicate}
+         UNION ALL
+         SELECT 'chapter' AS "sourceType", id AS "sourceId", title || ': ' || summary AS text, start_seconds AS start, end_seconds AS end
+         FROM ephemeral_chapters
+         WHERE user_id = $1 AND run_id = $4 AND ${chapterPredicate}
          ORDER BY start ASC
          LIMIT $5`,
         [input.userId, input.query, pattern, input.runId, input.limit]

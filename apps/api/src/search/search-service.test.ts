@@ -20,4 +20,13 @@ describe("search service", () => {
 
     expect(search.query).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1", runId: "r1" }));
   });
+
+  it("rejects expired results before querying content", async () => {
+    const search = { query: vi.fn() };
+    const availability = { assertAvailable: vi.fn().mockRejectedValue(Object.assign(new Error("expired"), { code: "RESULT_EXPIRED", status: 410 })) };
+    const service = createSearchService({ search, availability });
+
+    await expect(service.query({ userId: "u1", runId: "r1", query: "topic", limit: 20 })).rejects.toMatchObject({ code: "RESULT_EXPIRED", status: 410 });
+    expect(search.query).not.toHaveBeenCalled();
+  });
 });

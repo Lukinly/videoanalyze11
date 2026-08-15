@@ -12,6 +12,7 @@ export type AnalysisRunRecord = {
   displayName: string;
   retentionMode: RetentionMode;
   resultExpiresAt: Date | null;
+  resultsDeletedAt: Date | null;
   completedChunks: number;
   totalChunks: number;
   summaryJson?: unknown;
@@ -40,7 +41,7 @@ export function createAnalysisRunRepository(pool: Pool) {
         `INSERT INTO analysis_runs (id, user_id, video_id, display_name, retention_mode, stage, status, progress, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, 'queued', 'queued', 0, $6, $6)
          RETURNING id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
-           retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", stage, status, progress, error`,
+           retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", results_deleted_at AS "resultsDeletedAt", stage, status, progress, error`,
         [input.id, input.userId, input.videoId, input.displayName ?? "", input.retentionMode ?? "standard", now]
       );
       return { ...result.rows[0], completedChunks: 0, totalChunks: 0 };
@@ -48,7 +49,7 @@ export function createAnalysisRunRepository(pool: Pool) {
     async findOwnedById(userId: string, runId: string): Promise<AnalysisRunRecord | null> {
       const result = await pool.query<AnalysisRunRecord & { summaryJson: unknown }>(
         `SELECT id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
-                retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt",
+                retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", results_deleted_at AS "resultsDeletedAt",
                 stage, status, progress, error, summary_json AS "summaryJson"
          FROM analysis_runs WHERE id = $1 AND user_id = $2`,
         [runId, userId]
@@ -61,6 +62,8 @@ export function createAnalysisRunRepository(pool: Pool) {
          FROM chunks WHERE run_id = $1`,
         [runId]
       );
+      const record: AnalysisRunRecord = { ...run, ...chunks.rows[0] };
+      if (run.resultsDeletedAt || (run.retentionMode === "privacy" && run.resultExpiresAt && run.resultExpiresAt <= new Date())) return record;
       const segmentTable = run.retentionMode === "privacy" ? "ephemeral_transcript_segments" : "transcript_segments";
       const chapterTable = run.retentionMode === "privacy" ? "ephemeral_chapters" : "chapters";
       const segments = await pool.query<{ id: string; start: number; end: number; text: string }>(
@@ -86,7 +89,6 @@ export function createAnalysisRunRepository(pool: Pool) {
         );
         run.summaryJson = ephemeralSummary.rows[0] ?? null;
       }
-      const record: AnalysisRunRecord = { ...run, ...chunks.rows[0] };
       if (segments.rows.length > 0) {
         record.transcript = {
           segments: segments.rows.map((segment) => ({ ...segment, runId })),

@@ -1,10 +1,25 @@
 import type { FastifyInstance } from "fastify";
 import type { AuthServiceContract } from "./auth.js";
+import { DomainError } from "@videoanalyze/domain";
 
 export type MediaService = {
   getPlaybackUrl(input: { userId: string; videoId: string }): Promise<string>;
   reportPlaybackValidation?(input: { userId: string; videoId: string; loadedMetadata: boolean; canPlay: boolean; seekWorked: boolean }): Promise<void>;
 };
+
+export function createMediaService(dependencies: {
+  videos: { findOwnedById(userId: string, videoId: string): Promise<{ objectKey: string; originalDeletedAt?: Date | null } | null> };
+  storage: { getDownloadUrl(objectKey: string, expiresInSeconds: number): Promise<string> };
+}): MediaService {
+  return {
+    async getPlaybackUrl(input) {
+      const video = await dependencies.videos.findOwnedById(input.userId, input.videoId);
+      if (!video) throw new DomainError("NOT_FOUND", "video not found", 404);
+      if (video.originalDeletedAt) throw new DomainError("ORIGINAL_DELETED", "original video deleted", 410);
+      return dependencies.storage.getDownloadUrl(video.objectKey, 900);
+    }
+  };
+}
 
 export async function registerMediaRoutes(app: FastifyInstance, dependencies: { authService: AuthServiceContract; mediaService: MediaService }) {
   app.get<{ Params: { videoId: string } }>("/api/videos/:videoId/playback-url", async (request, reply) => {
