@@ -1,4 +1,4 @@
-import { bigint, boolean, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -24,7 +24,8 @@ export const videos = pgTable("videos", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   originalExpiresAt: timestamp("original_expires_at", { withTimezone: true }),
-  resultExpiresAt: timestamp("result_expires_at", { withTimezone: true })
+  resultExpiresAt: timestamp("result_expires_at", { withTimezone: true }),
+  originalDeletedAt: timestamp("original_deleted_at", { withTimezone: true })
 });
 
 export const analysisRuns = pgTable("analysis_runs", {
@@ -37,8 +38,73 @@ export const analysisRuns = pgTable("analysis_runs", {
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  displayName: text("display_name").notNull().default(""),
+  retentionMode: text("retention_mode").notNull().default("standard"),
+  resultExpiresAt: timestamp("result_expires_at", { withTimezone: true }),
+  resultsDeletedAt: timestamp("results_deleted_at", { withTimezone: true }),
+  mediaCleanupStatus: text("media_cleanup_status").notNull().default("pending"),
+  mediaCleanupAttempts: integer("media_cleanup_attempts").notNull().default(0),
+  mediaCleanupError: text("media_cleanup_error"),
+  mediaCleanedAt: timestamp("media_cleaned_at", { withTimezone: true })
+}, (table) => ({ resultExpiresAtIndex: index("analysis_runs_result_expires_at_idx").on(table.resultExpiresAt) }));
+
+export const transientObjects = pgTable("transient_objects", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  videoId: text("video_id"),
+  runId: text("run_id"),
+  objectKey: text("object_key").notNull(),
+  kind: text("kind").notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
+  lastCleanupError: text("last_cleanup_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull()
+}, (table) => ({
+  objectKeyUnique: uniqueIndex("transient_objects_object_key_unique").on(table.objectKey),
+  expiresAtIndex: index("transient_objects_expires_at_idx").on(table.expiresAt),
+  runIdIndex: index("transient_objects_run_id_idx").on(table.runId)
+}));
+
+export const ephemeralTranscriptSegments = pgTable("ephemeral_transcript_segments", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  runId: text("run_id").notNull(),
+  startSeconds: real("start_seconds").notNull(),
+  endSeconds: real("end_seconds").notNull(),
+  text: text("text").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true })
+}, (table) => ({
+  expiresAtIndex: index("ephemeral_transcript_segments_expires_at_idx").on(table.expiresAt),
+  runTimeIndex: index("ephemeral_transcript_segments_run_time_idx").on(table.runId, table.startSeconds)
+}));
+
+export const ephemeralRunSummaries = pgTable("ephemeral_run_summaries", {
+  runId: text("run_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  oneLineSummary: text("one_line_summary").notNull(),
+  overallSummary: text("overall_summary").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true })
+}, (table) => ({ expiresAtIndex: index("ephemeral_run_summaries_expires_at_idx").on(table.expiresAt) }));
+
+export const ephemeralChapters = pgTable("ephemeral_chapters", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  runId: text("run_id").notNull(),
+  title: text("title").notNull(),
+  startSeconds: real("start_seconds").notNull(),
+  endSeconds: real("end_seconds").notNull(),
+  summary: text("summary").notNull(),
+  bulletsJson: jsonb("bullets_json").notNull(),
+  sourceSegmentIdsJson: jsonb("source_segment_ids_json").notNull(),
+  alignmentWarning: boolean("alignment_warning").notNull().default(false),
+  expiresAt: timestamp("expires_at", { withTimezone: true })
+}, (table) => ({
+  expiresAtIndex: index("ephemeral_chapters_expires_at_idx").on(table.expiresAt),
+  runTimeIndex: index("ephemeral_chapters_run_time_idx").on(table.runId, table.startSeconds)
+}));
 
 export const chunks = pgTable("chunks", {
   id: text("id").primaryKey(),

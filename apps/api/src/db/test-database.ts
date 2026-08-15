@@ -27,14 +27,19 @@ const migrationStatements = [
     object_key TEXT NOT NULL, file_name TEXT NOT NULL, file_size BIGINT NOT NULL DEFAULT 0,
     fingerprint TEXT, duration REAL, status TEXT NOT NULL DEFAULT 'available',
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
-    original_expires_at TIMESTAMPTZ, result_expires_at TIMESTAMPTZ
+    original_expires_at TIMESTAMPTZ, result_expires_at TIMESTAMPTZ,
+    original_deleted_at TIMESTAMPTZ
   )`,
   `CREATE TABLE IF NOT EXISTS analysis_runs (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
     stage TEXT NOT NULL DEFAULT 'queued', status TEXT NOT NULL DEFAULT 'queued',
     progress REAL NOT NULL DEFAULT 0, heartbeat_at TIMESTAMPTZ, error TEXT,
-    summary_json JSONB,
+    summary_json JSONB, display_name TEXT NOT NULL DEFAULT '',
+    retention_mode TEXT NOT NULL DEFAULT 'standard' CHECK (retention_mode IN ('standard', 'privacy')),
+    result_expires_at TIMESTAMPTZ, results_deleted_at TIMESTAMPTZ,
+    media_cleanup_status TEXT NOT NULL DEFAULT 'pending' CHECK (media_cleanup_status IN ('pending', 'cleaning', 'cleaned', 'failed')),
+    media_cleanup_attempts INTEGER NOT NULL DEFAULT 0, media_cleanup_error TEXT, media_cleaned_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -48,6 +53,30 @@ const migrationStatements = [
     title TEXT NOT NULL, start_seconds REAL NOT NULL, end_seconds REAL NOT NULL,
     summary TEXT NOT NULL, bullets_json JSONB NOT NULL, source_segment_ids_json JSONB NOT NULL,
     alignment_warning BOOLEAN NOT NULL DEFAULT FALSE
+  )`,
+  `CREATE TABLE IF NOT EXISTS transient_objects (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    video_id TEXT REFERENCES videos(id) ON DELETE CASCADE, run_id TEXT REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    object_key TEXT NOT NULL UNIQUE, kind TEXT NOT NULL CHECK (kind IN ('original', 'audio', 'chunk', 'temporary_result')),
+    size_bytes BIGINT NOT NULL DEFAULT 0, expires_at TIMESTAMPTZ NOT NULL, deleted_at TIMESTAMPTZ,
+    cleanup_attempts INTEGER NOT NULL DEFAULT 0, last_cleanup_error TEXT, created_at TIMESTAMPTZ NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS ephemeral_transcript_segments (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    start_seconds REAL NOT NULL, end_seconds REAL NOT NULL, text TEXT NOT NULL, expires_at TIMESTAMPTZ
+  )`,
+  `CREATE TABLE IF NOT EXISTS ephemeral_run_summaries (
+    run_id TEXT PRIMARY KEY REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    one_line_summary TEXT NOT NULL, overall_summary TEXT NOT NULL, expires_at TIMESTAMPTZ
+  )`,
+  `CREATE TABLE IF NOT EXISTS ephemeral_chapters (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    title TEXT NOT NULL, start_seconds REAL NOT NULL, end_seconds REAL NOT NULL, summary TEXT NOT NULL,
+    bullets_json JSONB NOT NULL, source_segment_ids_json JSONB NOT NULL,
+    alignment_warning BOOLEAN NOT NULL DEFAULT FALSE, expires_at TIMESTAMPTZ
   )`,
   `CREATE TABLE IF NOT EXISTS chunks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
