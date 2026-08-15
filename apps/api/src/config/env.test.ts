@@ -15,6 +15,9 @@ describe("application configuration", () => {
       maxUploadBytes: 123,
       maxVideoDurationSeconds: 14_400,
       transientCapacityBytes: 40_000_000_000,
+      maxQueuedRunsPerUser: 2,
+      maxTotalQueuedRuns: 20,
+      maxQueueWaitSeconds: 3_600,
       originalRetentionDays: 7,
       resultRetentionDays: 30
     });

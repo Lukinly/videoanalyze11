@@ -51,4 +51,19 @@ describe("analysis service", () => {
     await expect(createAnalysisService(dependencies).start({ userId: "user_1", videoId: "video_1" })).rejects.toThrow("database unavailable");
     expect(dependencies.queue.add).not.toHaveBeenCalled();
   });
+
+  it("rejects before creating a run when the per-user queue is full", async () => {
+    const { createAnalysisService } = await import("./analysis-service.js");
+    const dependencies = {
+      videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1", fileName: "video.mp4", fileSize: 1 }) },
+      runs: {
+        getAdmissionSnapshot: vi.fn().mockResolvedValue({ userRunning: 1, userQueued: 2, totalQueued: 5, estimatedWaitSeconds: 100 }),
+        create: vi.fn(), findOwnedById: vi.fn(), requestCancellation: vi.fn()
+      },
+      queue: { add: vi.fn() }
+    };
+
+    await expect(createAnalysisService(dependencies).start({ userId: "user_1", videoId: "video_1" })).rejects.toMatchObject({ code: "USER_QUEUE_LIMIT", status: 429 });
+    expect(dependencies.runs.create).not.toHaveBeenCalled();
+  });
 });

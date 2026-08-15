@@ -26,7 +26,8 @@ export type AnalysisRun = {
   estimatedCost?: number;
   billingStatus?: BillingStatus;
   billedDurationSeconds?: number | null;
-  billingTierVersion?: string | null;
+  billingRuleVersion?: string | null;
+  billedMinutes?: number | null;
   reservedCredits?: number | null;
   progress?: number;
   completedChunks?: number;

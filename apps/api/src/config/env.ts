@@ -16,6 +16,9 @@ export type AppEnv = {
   maxVideoDurationSeconds: number;
   maxActiveRunsPerUser: number;
   globalWorkerConcurrency: number;
+  maxQueuedRunsPerUser: number;
+  maxTotalQueuedRuns: number;
+  maxQueueWaitSeconds: number;
   originalRetentionDays: number;
   resultRetentionDays: number;
 };
@@ -46,6 +49,9 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
     maxVideoDurationSeconds: positiveInteger(source.MAX_VIDEO_DURATION_SECONDS, 14_400),
     maxActiveRunsPerUser: positiveInteger(source.MAX_ACTIVE_RUNS_PER_USER, 2),
     globalWorkerConcurrency: positiveInteger(source.GLOBAL_WORKER_CONCURRENCY, 2),
+    maxQueuedRunsPerUser: positiveInteger(source.MAX_QUEUED_RUNS_PER_USER, 2),
+    maxTotalQueuedRuns: positiveInteger(source.MAX_TOTAL_QUEUED_RUNS, 20),
+    maxQueueWaitSeconds: positiveInteger(source.MAX_QUEUE_WAIT_SECONDS, 3_600),
     originalRetentionDays: positiveInteger(source.ORIGINAL_RETENTION_DAYS, 7),
     resultRetentionDays: positiveInteger(source.RESULT_RETENTION_DAYS, 30)
   };

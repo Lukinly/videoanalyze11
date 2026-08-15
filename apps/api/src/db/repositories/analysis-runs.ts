@@ -35,6 +35,20 @@ export type AnalysisRunRecord = {
 
 export function createAnalysisRunRepository(pool: Pool) {
   return {
+    async getAdmissionSnapshot(userId: string) {
+      const result = await pool.query<{ userRunning: number; userQueued: number; totalQueued: number; estimatedWaitSeconds: number }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE user_id = $1 AND status = 'running')::int AS "userRunning",
+           COUNT(*) FILTER (WHERE user_id = $1 AND status = 'queued')::int AS "userQueued",
+           COUNT(*) FILTER (WHERE status = 'queued')::int AS "totalQueued",
+           CEIL(COALESCE(SUM(CASE WHEN status IN ('queued', 'running')
+             THEN COALESCE(GREATEST(300, billed_duration_seconds * 0.35), 900) ELSE 0 END), 0) / 2)::int AS "estimatedWaitSeconds"
+         FROM analysis_runs
+         WHERE status IN ('queued', 'running')`,
+        [userId]
+      );
+      return result.rows[0] ?? { userRunning: 0, userQueued: 0, totalQueued: 0, estimatedWaitSeconds: 0 };
+    },
     async create(input: { id: string; userId: string; videoId: string; displayName?: string; retentionMode?: RetentionMode }): Promise<AnalysisRunRecord> {
       const now = new Date();
       const result = await pool.query<AnalysisRunRecord>(

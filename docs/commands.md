@@ -192,9 +192,13 @@ Redis 默认只在容器网络内暴露，未映射到宿主。
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | MinIO 凭据 |
 | `PUBLIC_HOST` / `STORAGE_HOST` | 网站与存储域名，见 operations.md 各阶段配置 |
 | `MAX_UPLOAD_BYTES` | 最大上传字节数，默认 2 GB |
-| `MAX_VIDEO_DURATION_SECONDS` | 视频时长上限，默认 7200 |
+| `MAX_VIDEO_DURATION_SECONDS` | 服务端探测的视频时长上限，默认 14400（4 小时） |
 | `MAX_ACTIVE_RUNS_PER_USER` | 每用户并发分析数，默认 2 |
 | `GLOBAL_WORKER_CONCURRENCY` | worker 全局并发，默认 2 |
+| `FFMPEG_CONCURRENCY` | 单 worker 的 FFmpeg 并发上限，默认 1 |
+| `LONG_VIDEO_CONCURRENCY` / `LONG_VIDEO_THRESHOLD_SECONDS` | 超过 120 分钟的视频处理槽，默认 1 个 |
+| `MAX_QUEUED_RUNS_PER_USER` / `MAX_TOTAL_QUEUED_RUNS` | 每用户队列上限 2、全局队列上限 20 |
+| `MAX_QUEUE_WAIT_SECONDS` | 新任务允许的预计最长排队时间，默认 3600 秒 |
 | `ORIGINAL_RETENTION_DAYS` / `RESULT_RETENTION_DAYS` | 兼容配置；终态原片立即清理，标准结果长期保留，隐私结果完成后保留 24 小时 |
 | `TRANSIENT_MEDIA_CAPACITY_BYTES` | 临时媒体容量预算；预计使用量超过 80% 时拒绝新上传，历史结果仍可读取 |
 | `RETENTION_SWEEP_INTERVAL_SECONDS` | 清理扫描间隔；处理孤立上传、清理重试、陈旧任务和隐私结果到期 |

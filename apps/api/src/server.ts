@@ -71,7 +71,7 @@ const app = buildApp({
   authService,
   secureCookies: env.nodeEnv === "production",
   uploadService: createUploadService({ transientMedia: repositories.transientMedia, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds, transientCapacityBytes: env.transientCapacityBytes }),
-  analysisService: createAnalysisService({ videos: repositories.videos, runs: repositories.runs, queue }),
+  analysisService: createAnalysisService({ videos: repositories.videos, runs: repositories.runs, queue, admissionLimits: { maxQueuedPerUser: env.maxQueuedRunsPerUser, maxTotalQueued: env.maxTotalQueuedRuns, maxEstimatedWaitSeconds: env.maxQueueWaitSeconds } }),
   resultService,
   credits: repositories.credits,
   topups: repositories.admin,

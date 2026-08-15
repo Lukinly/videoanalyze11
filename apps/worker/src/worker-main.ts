@@ -28,6 +28,8 @@ import {
 import { runRetentionSweep, sanitizeCleanupError } from "./retention/cleanup-worker.js";
 import { createRetentionRepository } from "./retention/retention-repository.js";
 import { startRetentionScheduler } from "./retention/retention-scheduler.js";
+import { FifoSemaphore, KeyedFifoSemaphore } from "./concurrency/semaphore.js";
+import { requireStageUpdate } from "./analysis/stage-fence.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -40,6 +42,9 @@ const env = {
   s3AccessKey: process.env.S3_ACCESS_KEY ?? "minioadmin",
   s3SecretKey: process.env.S3_SECRET_KEY ?? "minioadmin",
   concurrency: Number(process.env.GLOBAL_WORKER_CONCURRENCY ?? 2),
+  ffmpegConcurrency: Number(process.env.FFMPEG_CONCURRENCY ?? 1),
+  longVideoConcurrency: Number(process.env.LONG_VIDEO_CONCURRENCY ?? 1),
+  longVideoThresholdSeconds: Number(process.env.LONG_VIDEO_THRESHOLD_SECONDS ?? 7_200),
   retentionSweepIntervalSeconds: Number(process.env.RETENTION_SWEEP_INTERVAL_SECONDS ?? 900),
   // V1 summary uses a separate LLM (chat completions, Anthropic-compatible
   // endpoint). Read lowercase names first so the .env sample works verbatim.
@@ -53,7 +58,16 @@ if (!env.groqApiKey) throw new Error("GROQ_API_KEY is required by the worker");
 
 const pool = new Pool({ connectionString: env.databaseUrl, max: Math.max(2, env.concurrency + 1) });
 const s3 = new S3Client({ endpoint: env.s3Endpoint, region: env.s3Region, forcePathStyle: true, credentials: { accessKeyId: env.s3AccessKey, secretAccessKey: env.s3SecretKey } });
-const media = createMediaProcessor({});
+const rawMedia = createMediaProcessor({});
+const ffmpegSemaphore = new FifoSemaphore(positiveInteger(env.ffmpegConcurrency, 1));
+const longVideoSemaphore = new FifoSemaphore(positiveInteger(env.longVideoConcurrency, 1));
+const perUserSemaphore = new KeyedFifoSemaphore(1);
+const media: ReturnType<typeof createMediaProcessor> = {
+  probe: rawMedia.probe,
+  extractAudio: (...args) => ffmpegSemaphore.run(() => rawMedia.extractAudio(...args)),
+  renderChunk: (...args) => ffmpegSemaphore.run(() => rawMedia.renderChunk(...args)),
+  remuxToMp4: (...args) => ffmpegSemaphore.run(() => rawMedia.remuxToMp4(...args))
+};
 const asr = createGroqAsrProvider({ apiKey: env.groqApiKey, model: env.groqAsrModel });
 const summaryProvider = env.llmApiKey && env.llmApiBaseUrl && env.llmApiModel
   ? createAnthropicSummaryProvider({ apiKey: env.llmApiKey, baseUrl: env.llmApiBaseUrl, model: env.llmApiModel, contextWindow: env.llmContextWindow })
@@ -83,28 +97,37 @@ const consumer = createAnalysisConsumer({
   concurrency: Number.isSafeInteger(env.concurrency) && env.concurrency > 0 ? env.concurrency : 2,
   runner: {
     async run(job: AnalysisJob & { signal: AbortSignal }) {
-      const directory = validatedRunDirectory(job.runId);
-      const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, credits, clock });
-      await runAnalysisToTerminal({
-        async runAndPersist() {
-          await createV0AnalysisRunner({ asr, media, state }).run(job);
-          if (!summaryProvider) throw new Error("summary and AI notes provider is required");
-          await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
-          await createNotesRunner({ notes: summaryProvider, state }).run({ runId: job.runId });
-        },
-        markCompleted: () => state.markCompleted(job.runId),
-        async markFailedOrCancelled(error) {
-          const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
-          const result = await pool.query<{ status: string }>(
-            `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
-             WHERE id = $1 AND status IN ('queued', 'running', 'cancelling') RETURNING status`,
-            [job.runId, status, error instanceof Error ? error.message : "analysis failed", clock.now()]
-          );
-          return result.rowCount === 1 && result.rows[0]?.status === status;
-        },
-        settleSuccess: () => settleAnalysisSuccess({ runId: job.runId, credits }),
-        settleFailure: (error) => settleAnalysisFailure({ runId: job.runId, error, credits }),
-        cleanupMedia: () => cleanupTerminalRun(job.runId, clock.now())
+      await perUserSemaphore.run(job.userId, async () => {
+        const directory = validatedRunDirectory(job.runId);
+        const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, credits, clock });
+        await runAnalysisToTerminal({
+          async runAndPersist() {
+            if (job.signal.aborted || await state.isCancelling(job.runId)) throw new AnalysisCancelledError("before_processing");
+            await requireStageUpdate(() => state.setStage(job.runId, "probing", 0.01));
+            const probed = await state.getRun(job.runId);
+            const process = async () => {
+              await createV0AnalysisRunner({ asr, media, state }).run(job);
+              if (!summaryProvider) throw new Error("summary and AI notes provider is required");
+              await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
+              await createNotesRunner({ notes: summaryProvider, state }).run({ runId: job.runId });
+            };
+            if (probed.duration > env.longVideoThresholdSeconds) await longVideoSemaphore.run(process);
+            else await process();
+          },
+          markCompleted: () => state.markCompleted(job.runId),
+          async markFailedOrCancelled(error) {
+            const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
+            const result = await pool.query<{ status: string }>(
+              `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
+               WHERE id = $1 AND status IN ('queued', 'running', 'cancelling') RETURNING status`,
+              [job.runId, status, error instanceof Error ? error.message : "analysis failed", clock.now()]
+            );
+            return result.rowCount === 1 && result.rows[0]?.status === status;
+          },
+          settleSuccess: () => settleAnalysisSuccess({ runId: job.runId, credits }),
+          settleFailure: (error) => settleAnalysisFailure({ runId: job.runId, error, credits }),
+          cleanupMedia: () => cleanupTerminalRun(job.runId, clock.now())
+        });
       });
     }
   }
@@ -145,6 +168,7 @@ function createDatabaseState(input: {
   credits: ReturnType<typeof createWorkerCreditRepository>;
   clock: { now(): Date };
 }) {
+  let cachedRun: { inputVideoPath: string; audioPath: string; duration: number } | null = null;
   async function getResultContext(runId: string) {
     const result = await input.pool.query<{ userId: string; mode: RetentionMode; expiresAt: Date | null }>(
       `SELECT user_id AS "userId", retention_mode AS mode, result_expires_at AS "expiresAt"
@@ -175,6 +199,7 @@ function createDatabaseState(input: {
       return snapshot;
     },
     async getRun(runId: string) {
+      if (cachedRun) return cachedRun;
       const result = await input.pool.query<{ userId: string; objectKey: string; duration: number | null }>(
         `SELECT ar.user_id AS "userId", v.object_key AS "objectKey", v.duration
          FROM analysis_runs ar JOIN videos v ON v.id = ar.video_id
@@ -187,7 +212,8 @@ function createDatabaseState(input: {
       try { await stat(inputVideoPath); } catch { await downloadObject(input.s3, input.bucket, row.objectKey, inputVideoPath); }
       const mediaInfo = await input.media.probe(inputVideoPath);
       if (row.duration === null) await input.pool.query("UPDATE videos SET duration = $2, updated_at = $3 WHERE object_key = $1", [row.objectKey, mediaInfo.duration, new Date()]);
-      return { inputVideoPath, audioPath: `${input.directory}/audio.flac`, duration: row.duration ?? mediaInfo.duration };
+      cachedRun = { inputVideoPath, audioPath: `${input.directory}/audio.flac`, duration: row.duration ?? mediaInfo.duration };
+      return cachedRun;
     },
     async getChunks(runId: string): Promise<Array<{ index: number; start: number; end: number; status: "pending" | "processing" | "completed" | "failed"; transcript: Array<{ start: number; end: number; text: string }> | null }>> {
       const existing = await input.pool.query<{ userId: string; start: number; end: number; index: number; status: "pending" | "processing" | "completed" | "failed"; transcriptJson: unknown }>(
@@ -254,6 +280,10 @@ function redisConnectionFromUrl(redisUrl: string) {
 
 function validRetentionSweepIntervalMs(seconds: number): number {
   return Number.isSafeInteger(seconds) && seconds > 0 ? seconds * 1000 : 900_000;
+}
+
+function positiveInteger(value: number, fallback: number) {
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
 async function withSanitizedCleanupError<T>(operation: () => Promise<T>): Promise<T> {
