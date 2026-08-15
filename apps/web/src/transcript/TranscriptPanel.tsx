@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { TranscriptSegment } from "@videoanalyze/domain";
 
 type TranscriptPanelProps = {
@@ -40,7 +41,7 @@ export function TranscriptPanel({ segments, onSeek, activeSegmentId }: Transcrip
 
 function TranscriptItem({ segment, onSeek, active }: { segment: TranscriptSegment; onSeek: (seconds: number) => void; active: boolean }) {
   return (
-    <li>
+    <li data-follow-id={segment.id}>
       <button
         className={`transcript-item${active ? " is-active" : ""}`}
         type="button"
@@ -69,5 +70,3 @@ function VirtualTranscriptList({ segments, onSeek, activeSegmentId }: Transcript
     </div>
   );
 }
-
-import { useState } from "react";

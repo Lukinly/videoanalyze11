@@ -4,11 +4,59 @@
 
 1. Install Node.js 22+, pnpm, FFmpeg and FFprobe.
 2. Copy `.env.example` to `.env` and set the server-side `GROQ_API_KEY`. The key is consumed by the API/worker process only; it is never placed in the browser bundle.
-3. Start infrastructure with `docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-init mailpit`.
-4. Run `corepack pnpm install`, `corepack pnpm typecheck`, `corepack pnpm lint`, and `corepack pnpm test`.
-5. Build the browser client with `corepack pnpm --filter @videoanalyze/web build`.
+3. Run `corepack pnpm install`, `corepack pnpm typecheck`, `corepack pnpm lint`, and `corepack pnpm test`.
+4. Start the complete stack with `sudo docker compose -f infra/docker-compose.yml up -d --build`.
+5. For WSL development, run `bash scripts/setup-local-https.sh` once after the proxy is up. It exports Caddy's local CA, trusts it in WSL, and imports it into the Windows CurrentUser root store when WSL interop is available. Then open `https://localhost`.
+6. After PostgreSQL and the `migrate` service are ready, create the first administrator interactively with `corepack pnpm admin:create --email admin@example.com` (or run `sudo docker compose -f infra/docker-compose.yml run --rm api node dist/cli/admin-create.js --email admin@example.com`).
+7. Follow migration and service logs with `sudo docker compose -f infra/docker-compose.yml logs -f migrate api worker`.
 
 The Compose project is named `videoan`; its default containers are consequently named like `videoan-postgres-1`, `videoan-api-1`, and `videoan-worker-1`. The compose file includes PostgreSQL, Redis, MinIO, Mailpit, API, worker, web, and Caddy. In production, replace MinIO credentials, set a real `PUBLIC_HOST`, terminate HTTPS at Caddy, and use a managed PostgreSQL/Redis/S3-compatible service where appropriate.
+
+The `migrate` service applies numbered SQL files once, in lexical order, before the API and worker start. Migration files are append-only: never edit a migration after it has been applied. `docker compose down` preserves the named PostgreSQL, Redis, and MinIO volumes; `docker compose down -v` removes those volumes and therefore deletes user, video, and billing data.
+
+### Browser upload endpoint stages
+
+Local Compose defaults (the local Caddyfile uses an internal CA):
+
+```env
+CADDYFILE=Caddyfile
+PUBLIC_HOST=https://localhost
+STORAGE_HOST=https://storage.localhost
+S3_PUBLIC_ENDPOINT=https://storage.localhost
+MINIO_API_CORS_ALLOW_ORIGIN=https://localhost,http://localhost
+```
+
+The local CA is generated and persisted by Caddy in the `caddy-data` volume. Do not use `docker compose down -v`. If a Windows browser still shows a certificate warning after setup, restart the browser and import `.local/videoanalyze-local-root.crt` into the Windows CurrentUser Trusted Root store.
+
+For temporary server-IP verification:
+
+```env
+PUBLIC_HOST=http://SERVER_IP
+S3_PUBLIC_ENDPOINT=http://SERVER_IP:9000
+MINIO_API_CORS_ALLOW_ORIGIN=http://SERVER_IP
+```
+
+After DNS is ready for `example.com` and `storage.example.com`:
+
+```env
+CADDYFILE=Caddyfile.production
+PUBLIC_HOST=example.com
+STORAGE_HOST=storage.example.com
+S3_PUBLIC_ENDPOINT=https://storage.example.com
+MINIO_API_CORS_ALLOW_ORIGIN=https://example.com
+```
+
+The API and worker keep `S3_ENDPOINT=http://minio:9000` in Compose. Rebuild or recreate the API, worker, proxy, and MinIO services after changing these values. Point both website and storage hostnames at the server, allow ports 80 and 443 for Caddy, and close public MinIO ports 9000 and 9001 after the domain stage is verified if the deployment does not require the MinIO console. Verify that the browser upload URL host is `storage.localhost`, `SERVER_IP`, or `storage.example.com` for the active stage; it must never be `minio`.
+
+### Full local upload and analysis check
+
+After the local CA has been installed and the stack is running, verify the supplied MP4 through the real backend pipeline:
+
+```bash
+NODE_EXTRA_CA_CERTS="$PWD/.local/videoanalyze-local-root.crt" corepack pnpm verify:local-upload-analysis
+```
+
+The default input is `/mnt/v/Vworkspace/videoanlast/test.mp4`. Set `VIDEO_PATH` to use another file. Without `E2E_EMAIL` and `E2E_PASSWORD`, the verifier creates a unique test account through the registration-code API and reads the code from Mailpit. With those variables set, it logs into the existing account instead. The verifier requires the Groq key, uses real worker/provider processing, waits up to 45 minutes, and reports only IDs and counts—not passwords, keys, or complete presigned URLs.
 
 ## Retention and limits
 

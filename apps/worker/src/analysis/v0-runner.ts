@@ -1,5 +1,6 @@
 import type { AsrProvider } from "@videoanalyze/domain";
 import { mergeChunkTranscripts } from "./transcript-merge.js";
+import { AnalysisCancelledError, cancellationOutcome } from "./cancellation.js";
 
 type ChunkState = {
   index: number;
@@ -17,6 +18,7 @@ type RunnerState = {
   saveChunkTranscript(runId: string, index: number, transcript: Array<{ start: number; end: number; text: string }>): Promise<void>;
   markChunkCompleted(runId: string, index: number): Promise<void>;
   saveTranscript(runId: string, segments: unknown[], mergeWarnings: string[]): Promise<void>;
+  isCancelling?: (runId: string) => Promise<boolean>;
 };
 
 type Media = {
@@ -27,17 +29,22 @@ type Media = {
 export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState }) {
   return {
     async run(input: { userId: string; videoId: string; runId: string; signal: AbortSignal }): Promise<void> {
+      let processingStarted = false;
+      await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
+      await dependencies.state.setStage(input.runId, "probing", 0.02);
       const run = await dependencies.state.getRun(input.runId);
+      await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
       await dependencies.state.setStage(input.runId, "extracting_audio", 0.1);
-      if (input.signal.aborted) throw new Error("analysis cancelled");
+      await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
       await dependencies.media.extractAudio(run.inputVideoPath, run.audioPath, 0, input.signal);
+      processingStarted = true;
 
       const chunks = await dependencies.state.getChunks(input.runId);
       await dependencies.state.setStage(input.runId, "transcribing", 0.2);
       const completedTranscripts: Array<{ start: number; end: number; segments: Array<{ start: number; end: number; text: string }> }> = [];
 
       for (const chunk of chunks) {
-        if (input.signal.aborted) throw new Error("analysis cancelled");
+        await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
         if (chunk.status === "completed" && chunk.transcript) {
           completedTranscripts.push({ start: chunk.start, end: chunk.end, segments: chunk.transcript });
           continue;
@@ -51,10 +58,22 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
         completedTranscripts.push({ start: chunk.start, end: chunk.end, segments: result.segments });
       }
 
-      await dependencies.state.setStage(input.runId, "merging_transcript", 0.9);
       const merged = mergeChunkTranscripts({ videoDuration: run.duration, chunks: completedTranscripts });
       await dependencies.state.saveTranscript(input.runId, merged.segments, merged.mergeWarnings);
-      await dependencies.state.setStage(input.runId, "completed", 1);
+      // Do not mark the run completed here: the orchestrator (worker-main) runs
+      // the optional v1 summary before the run is finalized.
+      await dependencies.state.setStage(input.runId, "merging_transcript", 0.95);
     }
   };
+}
+
+async function assertNotCancelled(
+  runId: string,
+  signal: AbortSignal,
+  processingStarted: boolean,
+  isCancelling?: (runId: string) => Promise<boolean>
+): Promise<void> {
+  if (signal.aborted || await isCancelling?.(runId)) {
+    throw new AnalysisCancelledError(cancellationOutcome(processingStarted));
+  }
 }

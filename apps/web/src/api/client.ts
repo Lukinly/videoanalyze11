@@ -6,13 +6,23 @@ export type PublicUser = {
   id: string;
   email: string;
   emailVerifiedAt: string | null;
+  role: "user" | "admin";
+  status: "active" | "suspended";
+  mustChangePassword: boolean;
 };
+
+export type CreditBalance = { ledgerBalance: number; held: number; available: number };
+export type CreditLedgerEntry = { id: string; userId: string; amount: number; type: string; referenceId: string | null; reason: string; createdAt: string };
+export type CreditTopupRequest = { id: string; userId?: string; userEmail?: string | null; requestedAmount: number; note: string; status: "pending" | "approved" | "rejected"; reviewNote?: string | null; createdAt?: string; reviewedAt?: string | null };
+export type AdminUser = PublicUser & CreditBalance;
+export type AdminAuditLog = { id: string; adminUserId: string; action: string; targetUserId: string | null; targetRecordId: string | null; metadata: Record<string, unknown>; reason: string; createdAt: string };
 
 export type AnalysisRun = {
   id: string;
   videoId: string;
   status: AnalysisStatus | string;
   stage: AnalysisStage | string;
+  estimatedCost?: number;
   progress?: number;
   completedChunks?: number;
   totalChunks?: number;
@@ -37,6 +47,8 @@ export type UploadSession = {
   objectKey: string;
   uploadUrl: string;
   expiresAt: string;
+  fileSize: number;
+  estimatedCost: number;
 };
 
 export class ApiError extends Error {
@@ -75,7 +87,11 @@ export const api = {
     method: "POST",
     body: JSON.stringify(input)
   }),
-  register: (input: { email: string; password: string }) => request<{ userId: string; verificationSent: boolean }>("/api/auth/register", {
+  sendRegistrationCode: (input: { email: string }) => request<{ sent: true; expiresInSeconds: 600 }>("/api/auth/registration-code", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
+  register: (input: { email: string; password: string; confirmPassword: string; verificationCode: string }) => request<{ userId: string; verified: true }>("/api/auth/register", {
     method: "POST",
     body: JSON.stringify(input)
   }),
@@ -90,7 +106,23 @@ export const api = {
   cancelAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
   search: (runId: string, query: string) => request<{ results: SearchResult[] }>(`/api/analysis-runs/${encodeURIComponent(runId)}/search?q=${encodeURIComponent(query)}`),
   getPlaybackUrl: (videoId: string) => request<{ url: string }>(`/api/videos/${encodeURIComponent(videoId)}/playback-url`),
-  deleteVideo: (videoId: string) => request<void>(`/api/videos/${encodeURIComponent(videoId)}`, { method: "DELETE" })
+  deleteVideo: (videoId: string) => request<void>(`/api/videos/${encodeURIComponent(videoId)}`, { method: "DELETE" }),
+  getCredits: () => request<CreditBalance>("/api/credits"),
+  getCreditLedger: (limit = 50) => request<{ items: CreditLedgerEntry[] }>(`/api/credits/ledger?limit=${limit}`),
+  createCreditRequest: (input: { requestedAmount: number; note: string }) => request<CreditTopupRequest>("/api/credit-requests", { method: "POST", body: JSON.stringify(input) }),
+  getCreditRequests: () => request<{ items: CreditTopupRequest[] }>("/api/credit-requests"),
+  listAdminUsers: (input: { search?: string; status?: string } = {}) => request<{ items: AdminUser[] }>(`/api/admin/users?${new URLSearchParams(input).toString()}`),
+  getAdminUser: (id: string) => request<{ user: PublicUser; balance: CreditBalance; ledger: CreditLedgerEntry[] }>(`/api/admin/users/${encodeURIComponent(id)}`),
+  changeAdminRole: (id: string, input: { role: "user" | "admin"; reason: string }) => request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/role`, { method: "PATCH", body: JSON.stringify(input) }),
+  changeAdminStatus: (id: string, input: { status: "active" | "suspended"; reason: string }) => request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/status`, { method: "PATCH", body: JSON.stringify(input) }),
+  adjustAdminCredits: (id: string, input: { direction: "grant" | "debit"; amount: number; reason: string; idempotencyKey: string }) => request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/credits`, { method: "POST", body: JSON.stringify(input) }),
+  forceAdminPasswordReset: (id: string) => request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/force-password-reset`, { method: "POST" }),
+  listAdminCreditRequests: (status = "pending") => request<{ items: CreditTopupRequest[] }>(`/api/admin/credit-requests?status=${encodeURIComponent(status)}`),
+  approveAdminTopup: (id: string, note: string) => request<CreditTopupRequest>(`/api/admin/credit-requests/${encodeURIComponent(id)}/approve`, { method: "POST", body: JSON.stringify({ note }) }),
+  rejectAdminTopup: (id: string, note: string) => request<CreditTopupRequest>(`/api/admin/credit-requests/${encodeURIComponent(id)}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
+  listAdminAuditLogs: () => request<{ items: AdminAuditLog[] }>("/api/admin/audit-logs"),
+  resetPassword: (input: { token: string; password: string; confirmPassword: string }) => request<{ ok: true }>("/api/auth/password-reset", { method: "POST", body: JSON.stringify(input) }),
+  changePassword: (input: { password: string; confirmPassword: string }) => request<{ ok: true }>("/api/auth/change-password", { method: "POST", body: JSON.stringify(input) })
 };
 
 export function subscribeToAnalysis(

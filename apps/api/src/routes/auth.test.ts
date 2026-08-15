@@ -2,11 +2,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 describe("auth routes", () => {
   const authService = {
-    register: vi.fn().mockResolvedValue({ userId: "user_1", verificationSent: true }),
+    sendRegistrationCode: vi.fn().mockResolvedValue({ sent: true, expiresInSeconds: 600 }),
+    register: vi.fn().mockResolvedValue({ userId: "user_1", verified: true }),
     verifyEmail: vi.fn().mockResolvedValue({ userId: "user_1", trialCreditsGranted: true }),
     login: vi.fn().mockResolvedValue({ sessionToken: "session-token", user: { id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() } }),
     authenticate: vi.fn().mockResolvedValue({ id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() }),
-    logout: vi.fn().mockResolvedValue(undefined)
+    logout: vi.fn().mockResolvedValue(undefined),
+    resetPassword: vi.fn().mockResolvedValue({ ok: true }),
+    changePassword: vi.fn().mockResolvedValue({ ok: true })
   };
   let app: { inject: (options: { method: string; url: string; headers?: Record<string, string>; payload?: unknown }) => Promise<{ statusCode: number; headers: Record<string, string | string[] | undefined>; body: string; json: () => unknown }>; close: () => Promise<void> };
 
@@ -24,12 +27,26 @@ describe("auth routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/auth/register",
-      payload: { email: "user@example.com", password: "correct horse battery staple" }
+      payload: { email: "user@example.com", password: "correct horse battery staple", confirmPassword: "correct horse battery staple", verificationCode: "123456" }
     });
 
     expect(response.statusCode).toBe(202);
-    expect(response.json()).toEqual({ userId: "user_1", verificationSent: true });
+    expect(response.json()).toEqual({ userId: "user_1", verified: true });
+    expect(authService.register).toHaveBeenCalledWith(expect.objectContaining({ verificationCode: "123456" }));
+    expect(response.body).not.toContain("123456");
     expect(response.body).not.toContain("session-token");
+  });
+
+  it("sends a registration code through the API", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/registration-code",
+      payload: { email: "user@example.com" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ sent: true, expiresInSeconds: 600 });
+    expect(authService.sendRegistrationCode).toHaveBeenCalledWith({ email: "user@example.com" });
   });
 
   it("sets a secure HttpOnly session cookie on login", async () => {

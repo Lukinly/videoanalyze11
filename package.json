@@ -4,12 +4,14 @@
   "packageManager": "pnpm@11.20.0",
   "scripts": {
     "test": "vitest run",
-    "test:v0": "pnpm test",
+    "test:v0": "corepack pnpm test",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "dev": "pnpm --parallel --filter @videoanalyze/api --filter @videoanalyze/worker --filter @videoanalyze/web dev",
-    "build": "pnpm -r build",
-    "test:acceptance": "vitest run tests/acceptance"
+    "dev": "corepack pnpm --parallel --filter @videoanalyze/api --filter @videoanalyze/worker --filter @videoanalyze/web dev",
+    "build": "corepack pnpm -r build",
+    "test:acceptance": "vitest run tests/acceptance",
+    "verify:local-upload-analysis": "node scripts/verify-local-upload-analysis.mjs",
+    "admin:create": "corepack pnpm --filter @videoanalyze/api admin:create"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

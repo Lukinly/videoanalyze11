@@ -5,7 +5,10 @@ export const emailSchema = z.string().trim().toLowerCase().email().max(320);
 export const publicUserSchema = z.object({
   id: z.string().min(1),
   email: emailSchema,
-  emailVerifiedAt: z.string().datetime().nullable()
+  emailVerifiedAt: z.string().datetime().nullable(),
+  role: z.enum(["user", "admin"]),
+  status: z.enum(["active", "suspended"]),
+  mustChangePassword: z.boolean()
 });
 
 export type PublicUser = z.infer<typeof publicUserSchema>;

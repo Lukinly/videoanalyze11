@@ -1,34 +1,42 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type AnalysisRun, type PublicUser } from "./api/client";
+import { api, type AnalysisRun, type CreditBalance, type PublicUser } from "./api/client";
 import { LoginPage } from "./auth/LoginPage";
 import { RegisterPage } from "./auth/RegisterPage";
 import { VerifyEmailPage } from "./auth/VerifyEmailPage";
-import { AnalysisProgress } from "./analysis/AnalysisProgress";
 import { UploadVideo, type UploadedVideo } from "./library/UploadVideo";
-import { VideoPlayer, type PlayerController } from "./player/VideoPlayer";
-import { TranscriptPanel } from "./transcript/TranscriptPanel";
-import { SummaryPanel } from "./summary/SummaryPanel";
-import { ChapterList } from "./chapters/ChapterList";
-import { SearchPanel } from "./search/SearchPanel";
+import type { PlayerController } from "./player/VideoPlayer";
+import { AdminPage } from "./admin/AdminPage";
+import { ResetPasswordPage } from "./auth/ResetPasswordPage";
+import { Brand } from "./brand/Brand";
+import { WatchingWorkspace } from "./viewing/WatchingWorkspace";
+import { AccountPage } from "./account/AccountPage";
 
 export function App() {
   const [user, setUser] = useState<PublicUser | null>(null);
   const [authView, setAuthView] = useState<"login" | "register">("login");
   const [verifyToken, setVerifyToken] = useState<string | undefined>();
+  const [resetToken, setResetToken] = useState<string | undefined>();
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [video, setVideo] = useState<UploadedVideo | null>(null);
   const [run, setRun] = useState<AnalysisRun | null>(null);
+  const [credits, setCredits] = useState<CreditBalance | null>(null);
   const playerRef = useRef<PlayerController>(null);
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("token") ?? undefined;
     if (window.location.pathname === "/verify-email") setVerifyToken(token);
-    void api.getMe().then(setUser, () => setUser(null)).finally(() => setCheckingAuth(false));
+    if (window.location.pathname === "/reset-password") setResetToken(token);
+    void api.getMe().then((nextUser) => { setUser(nextUser); void api.getCredits().then(setCredits, () => setCredits(null)); }, () => setUser(null)).finally(() => setCheckingAuth(false));
   }, []);
 
   if (verifyToken || window.location.pathname === "/verify-email") return <VerifyEmailPage token={verifyToken} onDone={() => { window.history.replaceState({}, "", "/"); setVerifyToken(undefined); setAuthView("login"); }} />;
-  if (checkingAuth) return <main className="loading-shell"><span className="brand-dot" /> 正在打开工作台…</main>;
+  if (resetToken || window.location.pathname === "/reset-password") return <ResetPasswordPage token={resetToken} onDone={() => { window.history.replaceState({}, "", "/"); setResetToken(undefined); setAuthView("login"); }} />;
+  if (checkingAuth) return <main className="loading-shell"><Brand />正在打开工作台…</main>;
   if (!user) return authView === "login" ? <LoginPage onSuccess={setUser} onRegister={() => setAuthView("register")} /> : <RegisterPage onLogin={() => setAuthView("login")} />;
+  if (user.mustChangePassword) return <ResetPasswordPage forceChange onDone={() => { void api.getMe().then(setUser); }} />;
+  const logout = () => { void api.logout().finally(() => { setUser(null); setVideo(null); setRun(null); setCredits(null); }); };
+  if (user.role === "admin" && window.location.pathname === "/admin") return <AdminPage />;
+  if (window.location.pathname === "/account") return <AccountPage user={user} onLogout={logout} />;
 
   async function handleUploaded(uploaded: UploadedVideo) {
     setVideo(uploaded);
@@ -36,16 +44,19 @@ export function App() {
     setRun(started);
   }
 
-  return <Workspace user={user} video={video} run={run} playerRef={playerRef} onLogout={() => { void api.logout().finally(() => { setUser(null); setVideo(null); setRun(null); }); }} onUploaded={(uploaded) => { void handleUploaded(uploaded); }} onCompleted={setRun} />;
+  const completed = (completedRun: AnalysisRun) => { setRun(completedRun); void api.getCredits().then(setCredits); };
+
+  return video
+    ? <WatchingWorkspace user={user} credits={credits} video={video} run={run} playerRef={playerRef} onLogout={logout} onCompleted={completed} />
+    : <HomePage user={user} credits={credits} onLogout={logout} onUploaded={(uploaded) => { void handleUploaded(uploaded); }} />;
 }
 
-function Workspace({ user, video, run, playerRef, onLogout, onUploaded, onCompleted }: { user: PublicUser; video: UploadedVideo | null; run: AnalysisRun | null; playerRef: React.RefObject<PlayerController | null>; onLogout: () => void; onUploaded: (video: UploadedVideo) => void; onCompleted: (run: AnalysisRun) => void }) {
-  const segments = run?.transcript?.segments ?? [];
-  return <main className="app-shell">
-    <header className="topbar"><div className="brand-lockup"><span className="brand-dot" /> videoanalyze</div><div className="user-menu"><span>{user.email}</span><button className="text-button" type="button" onClick={onLogout}>退出</button></div></header>
-    <div className="workspace-grid">
-      <div className="main-column"><div className="hero-copy"><p className="eyebrow">Your private video desk</p><h1>把每段视频，变成<br /><em>可搜索的知识。</em></h1><p>上传、转写、定位。AI 在后台处理，你在前台掌控每一个时间点。</p></div>{!video ? <UploadVideo onUploaded={onUploaded} /> : <VideoPlayer ref={playerRef} src={video.playbackUrl} title={video.fileName} />}<AnalysisProgress runId={run?.id} onCompleted={onCompleted} /></div>
-      <aside className="side-column"><SummaryPanel oneLineSummary={run?.summary?.oneLineSummary} overallSummary={run?.summary?.overallSummary} /><ChapterList chapters={(run?.summary?.chapters ?? []).flatMap((chapter) => chapter.start === undefined || chapter.end === undefined ? [] : [{ id: chapter.id, title: chapter.title, start: chapter.start, end: chapter.end, summary: chapter.summary, alignmentWarning: chapter.alignmentWarning }])} onSeek={(seconds) => playerRef.current?.seek(seconds)} /><SearchPanel runId={run?.id} onSeek={(seconds) => playerRef.current?.seek(seconds)} /><TranscriptPanel segments={segments} onSeek={(seconds) => playerRef.current?.seek(seconds)} /></aside>
+function HomePage({ user, credits, onLogout, onUploaded }: { user: PublicUser; credits: CreditBalance | null; onLogout: () => void; onUploaded: (video: UploadedVideo) => void }) {
+  return <main className="app-shell home-shell">
+    <header className="topbar"><Brand /><div className="user-menu"><span className="credit-badge">{credits ? `${credits.available} 积分可用` : "积分加载中"}</span>{user.role === "admin" && <a className="text-button" href="/admin">后台</a>}<span>{user.email}</span><a className="account-link" href="/account">个人中心</a><button className="text-button" type="button" onClick={onLogout}>退出</button></div></header>
+    <div className="home-content">
+      <div className="hero-copy"><p className="eyebrow">Your private video desk</p><h1>把每段视频，变成<br /><em>可搜索的知识。</em></h1><p>上传、转写、定位。AI 在后台处理，你在前台掌控每一个时间点。</p></div>
+      <UploadVideo availableCredits={credits?.available} onUploaded={onUploaded} />
     </div>
   </main>;
 }

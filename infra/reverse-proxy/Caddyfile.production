@@ -1,0 +1,15 @@
+{$PUBLIC_HOST} {
+  encode gzip
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+  handle {
+    reverse_proxy web:80
+  }
+}
+
+{$STORAGE_HOST} {
+  reverse_proxy minio:9000 {
+    header_up Host {http.request.host}
+  }
+}

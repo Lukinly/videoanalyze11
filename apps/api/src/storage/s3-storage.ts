@@ -9,11 +9,13 @@ type Presign = (client: unknown, command: unknown, options: { expiresIn: number 
 
 export function createS3ObjectStorage(input: {
   client: S3ClientLike;
+  presignClient?: unknown;
   bucket: string;
   presign?: Presign;
   uploadUrlExpiresInSeconds?: number;
 }): ObjectStorage {
   const presign = input.presign ?? ((client, command, options) => getSignedUrl(client as never, command as never, options));
+  const signingClient = input.presignClient ?? input.client;
 
   return {
     async createUpload(upload) {
@@ -24,14 +26,14 @@ export function createS3ObjectStorage(input: {
         ContentLength: upload.contentLength
       });
       const expiresIn = input.uploadUrlExpiresInSeconds ?? 900;
-      return { uploadUrl: await presign(input.client, command, { expiresIn }), expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
+      return { uploadUrl: await presign(signingClient, command, { expiresIn }), expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
     },
     async head(objectKey) {
       const result = await input.client.send(new HeadObjectCommand({ Bucket: input.bucket, Key: objectKey }));
       return { size: result.ContentLength ?? 0, contentType: result.ContentType ?? "application/octet-stream" };
     },
     async getDownloadUrl(objectKey, expiresInSeconds) {
-      return presign(input.client, new GetObjectCommand({ Bucket: input.bucket, Key: objectKey }), { expiresIn: expiresInSeconds });
+      return presign(signingClient, new GetObjectCommand({ Bucket: input.bucket, Key: objectKey }), { expiresIn: expiresInSeconds });
     },
     async downloadToFile(objectKey, destination) {
       const result = await input.client.send(new GetObjectCommand({ Bucket: input.bucket, Key: objectKey }));

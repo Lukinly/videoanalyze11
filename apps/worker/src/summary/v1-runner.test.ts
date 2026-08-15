@@ -7,7 +7,7 @@ describe("v1 summary runner", () => {
       capabilities: vi.fn().mockResolvedValue({ contextWindow: 10_000, structuredOutput: true }),
       summarize: vi.fn()
         .mockRejectedValueOnce(new Error("temporary provider failure"))
-        .mockResolvedValueOnce({ oneLineSummary: "一句话", overallSummary: "整体", chapters: [{ id: "ch1", title: "背景", sourceSegmentIds: ["s1"], summary: "简介", bullets: [] }] })
+        .mockResolvedValueOnce({ oneLineSummary: "一句话", overallSummary: "整体", chapters: [{ id: "ch1", title: "背景", sourceSegmentIds: ["seg_1"], summary: "简介", bullets: [{ text: "要点", sourceSegmentIds: ["seg_1"] }] }] })
     };
     const state = {
       getTranscript: vi.fn().mockResolvedValue({
@@ -22,8 +22,13 @@ describe("v1 summary runner", () => {
     await runner.run({ runId: "r1" });
 
     expect(summary.summarize).toHaveBeenCalledTimes(2);
+    // The model is handed compact ids (the full "<runId>_seg_N" ids get
+    // truncated by models), then the runner remaps citations back to real ids.
+    expect(summary.summarize).toHaveBeenCalledWith(expect.objectContaining({
+      segments: [{ id: "seg_1", runId: "r1", start: 10, end: 20, text: "内容" }]
+    }));
     expect(state.saveSummary).toHaveBeenCalledWith("r1", expect.objectContaining({
-      chapters: [expect.objectContaining({ start: 10, end: 20, alignmentWarning: false })]
+      chapters: [expect.objectContaining({ start: 10, end: 20, alignmentWarning: false, sourceSegmentIds: ["s1"] })]
     }));
   });
 });

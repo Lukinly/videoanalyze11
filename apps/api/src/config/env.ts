@@ -4,6 +4,7 @@ export type AppEnv = {
   databaseUrl: string;
   redisUrl: string;
   s3Endpoint: string;
+  s3PublicEndpoint: string;
   s3Region: string;
   s3Bucket: string;
   s3AccessKey: string;
@@ -22,6 +23,9 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
   const nodeEnv = source.NODE_ENV === "production" ? "production" : source.NODE_ENV === "test" ? "test" : "development";
   const groqApiKey = source.GROQ_API_KEY?.trim() ?? "";
   if (nodeEnv === "production" && !groqApiKey) throw new Error("GROQ_API_KEY is required");
+  const explicitS3PublicEndpoint = source.S3_PUBLIC_ENDPOINT?.trim();
+  if (nodeEnv === "production" && !explicitS3PublicEndpoint) throw new Error("S3_PUBLIC_ENDPOINT is required in production");
+  const s3PublicEndpoint = validateS3PublicEndpoint(explicitS3PublicEndpoint || source.S3_ENDPOINT || "http://127.0.0.1:9000");
 
   return {
     nodeEnv,
@@ -29,6 +33,7 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
     databaseUrl: source.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
     redisUrl: source.REDIS_URL ?? "redis://127.0.0.1:6379",
     s3Endpoint: source.S3_ENDPOINT ?? "http://127.0.0.1:9000",
+    s3PublicEndpoint,
     s3Region: source.S3_REGION ?? "us-east-1",
     s3Bucket: source.S3_BUCKET ?? "videoanalyze",
     s3AccessKey: source.S3_ACCESS_KEY ?? "minioadmin",
@@ -42,6 +47,22 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
     originalRetentionDays: positiveInteger(source.ORIGINAL_RETENTION_DAYS, 7),
     resultRetentionDays: positiveInteger(source.RESULT_RETENTION_DAYS, 30)
   };
+}
+
+function validateS3PublicEndpoint(value: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("S3_PUBLIC_ENDPOINT must be an http or https URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("S3_PUBLIC_ENDPOINT must be an http or https URL");
+  }
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("S3_PUBLIC_ENDPOINT must not contain a path");
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function positiveInteger(value: string | undefined, fallback: number) {

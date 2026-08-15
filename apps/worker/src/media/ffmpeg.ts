@@ -3,7 +3,10 @@ export function buildExtractAudioArgs(inputPath: string, outputPath: string, aud
 }
 
 export function buildAudioChunkArgs(inputPath: string, outputPath: string, start: number, duration: number): string[] {
-  return ["-ss", String(start), "-i", inputPath, "-t", String(duration), "-c", "copy", "-y", outputPath];
+  // Re-encode instead of -c copy: a stream-copied FLAC slice keeps the source's
+  // STREAMINFO total-samples value, so a tail chunk's declared duration far
+  // exceeds its actual samples and the ASR provider rejects it (502).
+  return ["-ss", String(start), "-i", inputPath, "-t", String(duration), "-c:a", "flac", "-y", outputPath];
 }
 
 export function buildRemuxArgs(inputPath: string, outputPath: string): string[] {

@@ -11,4 +11,5 @@ build
 coverage
 **/coverage
 apps/web/test-results
+*.tsbuildinfo
 *.log

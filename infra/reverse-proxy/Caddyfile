@@ -1,9 +1,25 @@
-{$PUBLIC_HOST:localhost} {
+http://localhost {
+  redir https://localhost{uri} permanent
+}
+
+https://localhost {
+  tls internal
   encode gzip
   handle /api/* {
     reverse_proxy api:3000
   }
   handle {
     reverse_proxy web:80
+  }
+}
+
+http://storage.localhost {
+  redir https://storage.localhost{uri} permanent
+}
+
+https://storage.localhost {
+  tls internal
+  reverse_proxy minio:9000 {
+    header_up Host {http.request.host}
   }
 }

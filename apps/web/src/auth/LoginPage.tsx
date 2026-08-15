@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api, type PublicUser } from "../api/client";
+import { Brand } from "../brand/Brand";
 
 export function LoginPage({ onSuccess, onRegister }: { onSuccess: (user: PublicUser) => void; onRegister: () => void }) {
   const [email, setEmail] = useState("");
@@ -35,5 +36,5 @@ export function LoginPage({ onSuccess, onRegister }: { onSuccess: (user: PublicU
 }
 
 function AuthCard({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
-  return <main className="auth-shell"><div className="brand-lockup"><span className="brand-dot" /> videoanalyze</div><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>;
+  return <main className="auth-shell"><Brand /><section className="auth-card"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{children}</section></main>;
 }

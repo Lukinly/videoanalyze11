@@ -1,6 +1,30 @@
 import { describe, expect, it, vi } from "vitest";
 
 describe("v0 analysis runner", () => {
+  it("marks a run as probing before loading the source media", async () => {
+    const { createV0AnalysisRunner } = await import("./v0-runner.js");
+    const state = createFakeState();
+    const stageCalls: string[] = [];
+    state.setStage = async (_runId: string, stage: string) => { stageCalls.push(stage); };
+    state.getRun = async () => {
+      expect(stageCalls).toEqual(["probing"]);
+      return { inputVideoPath: "/tmp/video.mp4", audioPath: "/tmp/audio.flac", duration: 20 };
+    };
+    const media = {
+      extractAudio: vi.fn(),
+      renderChunk: vi.fn().mockResolvedValue({ path: "/tmp/chunk-1.flac", size: 10 })
+    };
+    const runner = createV0AnalysisRunner({
+      asr: { transcribeChunk: vi.fn().mockResolvedValue({ segments: [] }) },
+      media,
+      state
+    });
+
+    await runner.run({ userId: "user_1", videoId: "video_1", runId: "run_1", signal: new AbortController().signal });
+
+    expect(stageCalls[0]).toBe("probing");
+  });
+
   it("does not call ASR for a completed chunk during resume", async () => {
     const { createV0AnalysisRunner } = await import("./v0-runner.js");
     const asr = { transcribeChunk: vi.fn().mockResolvedValue({ segments: [{ start: 0, end: 2, text: "new" }] }) };
@@ -33,7 +57,7 @@ function createFakeState() {
         { index: 1, start: 10, end: 20, status: "pending" as const, transcript: null }
       ];
     },
-    async setStage() {},
+    async setStage(...args: [string, string, number?]) { void args; },
     async markChunkProcessing() {},
     async saveChunkTranscript(_runId: string, index: number) { state.savedChunkIndexes.push(index); },
     async markChunkCompleted(_runId: string, index: number) { state.completedChunkIndexes.push(index); },
