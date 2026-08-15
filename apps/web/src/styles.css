@@ -208,6 +208,19 @@ body { background: radial-gradient(circle at 8% 0%, #edf4ff 0, transparent 30rem
 .account-card, .account-grid > .credit-panel { background: rgba(255,255,255,.9); border-radius: 18px; box-shadow: 0 14px 38px rgba(40,42,100,.07); margin: 0; padding: 1.35rem; }
 .account-grid > .credit-panel { grid-row: span 2; }
 .account-card h2 { font-size: 1.1rem; margin: 0; }
+.history-card { background: rgba(255,255,255,.82); border: 1px solid var(--line); border-radius: 18px; grid-column: 1 / -1; padding: 1.2rem; }
+.history-list { display: grid; gap: .55rem; list-style: none; margin: .8rem 0 0; padding: 0; }
+.history-list a { align-items: center; background: #f8f8fc; border-radius: 12px; color: inherit; display: flex; justify-content: space-between; padding: .8rem 1rem; text-decoration: none; }
+.history-list a:hover { background: #f1efff; }
+.history-list span:first-child { display: grid; gap: .2rem; }
+.history-list small, .history-empty, .retention-copy { color: var(--muted); font-size: .75rem; }
+.retention-options { border: 0; display: grid; gap: .45rem; margin: .9rem 0; padding: 0; }
+.retention-options legend { font-size: .78rem; font-weight: 760; margin-bottom: .35rem; }
+.retention-options label { color: #555a7d; font-size: .78rem; }
+.result-actions { align-items: center; display: flex; flex-wrap: wrap; gap: .5rem; padding: .35rem 0; }
+.local-file-button { cursor: pointer; }
+.danger-button { background: #fff3f4; border: 1px solid #f2c9ce; border-radius: 999px; color: #a13a48; padding: .55rem .8rem; }
+.expiry-notice { background: #fff8e8; border: 1px solid #efdfb6; border-radius: 10px; color: #725d27; font-size: .8rem; padding: .75rem; }
 .profile-card dl { margin: 1.2rem 0 0; }
 .profile-card dl div { border-top: 1px solid #ececf4; padding: .8rem 0; }
 .profile-card dt { color: #9395aa; font-size: .72rem; }

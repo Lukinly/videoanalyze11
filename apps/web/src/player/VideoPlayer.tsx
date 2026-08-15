@@ -12,9 +12,10 @@ type VideoPlayerProps = {
   title?: string;
   onTimeUpdate?: (seconds: number) => void;
   onPlaybackValidation?: (event: "loadedmetadata" | "canplay" | "error") => void;
+  emptyLabel?: string;
 };
 
-export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(function VideoPlayer({ src, title = "视频播放器", onTimeUpdate, onPlaybackValidation }, ref) {
+export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(function VideoPlayer({ src, title = "视频播放器", onTimeUpdate, onPlaybackValidation, emptyLabel = "上传视频后在这里播放" }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -47,7 +48,7 @@ export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(functi
       ) : (
         <div className="video-placeholder" role="img" aria-label="等待上传视频">
           <span className="play-mark">▶</span>
-          <p>上传视频后在这里播放</p>
+          <p>{emptyLabel}</p>
         </div>
       )}
     </div>

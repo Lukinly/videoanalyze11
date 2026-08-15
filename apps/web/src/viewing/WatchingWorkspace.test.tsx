@@ -17,11 +17,11 @@ const user: PublicUser = {
 };
 
 const credits: CreditBalance = { ledgerBalance: 12, held: 2, available: 10 };
-const video: UploadedVideo = { videoId: "video-1", fileName: "demo.mp4", playbackUrl: "blob:demo", fileSize: 100, estimatedCost: 1 };
+const video: UploadedVideo = { videoId: "video-1", fileName: "demo.mp4", playbackUrl: "blob:demo", fileSize: 100, estimatedCost: 1, retentionMode: "standard" };
 describe("WatchingWorkspace", () => {
   it("renders the immersive player and content navigation", async () => {
     const userEventApi = userEvent.setup();
-    const { container } = render(<WatchingWorkspace user={user} credits={credits} video={video} run={null} playerRef={createRef<PlayerController>()} onCompleted={vi.fn()} onLogout={vi.fn()} />);
+    const { container } = render(<WatchingWorkspace user={user} credits={credits} video={video} run={null} playerRef={createRef<PlayerController>()} onCompleted={vi.fn()} onLogout={vi.fn()} onAttach={vi.fn()} onDeleted={vi.fn()} />);
 
     expect(container.querySelector(".watching-shell")).not.toBeNull();
     expect(container.querySelector(".watching-stage")).not.toBeNull();

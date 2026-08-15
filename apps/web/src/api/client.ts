@@ -1,4 +1,4 @@
-import type { AnalysisStage, AnalysisStatus, TranscriptSegment } from "@videoanalyze/domain";
+import type { AnalysisStage, AnalysisStatus, ResultAvailability, RetentionMode, TranscriptSegment } from "@videoanalyze/domain";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 
@@ -26,6 +26,12 @@ export type AnalysisRun = {
   progress?: number;
   completedChunks?: number;
   totalChunks?: number;
+  fileName?: string;
+  duration?: number | null;
+  retentionMode?: RetentionMode;
+  resultAvailability?: ResultAvailability;
+  resultExpiresAt?: string | null;
+  originalDeletedAt?: string | null;
   transcript?: { segments: TranscriptSegment[]; mergeWarnings: string[] };
   summary?: {
     oneLineSummary: string;
@@ -101,8 +107,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify(input)
   }),
-  startAnalysis: (videoId: string) => request<AnalysisRun>(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST" }),
+  startAnalysis: (videoId: string, retentionMode: RetentionMode = "standard") => request<AnalysisRun>(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST", body: JSON.stringify({ retentionMode }) }),
   getAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}`),
+  listAnalyses: (limit = 50) => request<{ items: AnalysisRun[] }>(`/api/analysis-runs?limit=${limit}`),
+  deleteAnalysisResults: (runId: string) => request<void>(`/api/analysis-runs/${encodeURIComponent(runId)}/results`, { method: "DELETE" }),
   cancelAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }),
   search: (runId: string, query: string) => request<{ results: SearchResult[] }>(`/api/analysis-runs/${encodeURIComponent(runId)}/search?q=${encodeURIComponent(query)}`),
   getPlaybackUrl: (videoId: string) => request<{ url: string }>(`/api/videos/${encodeURIComponent(videoId)}/playback-url`),
