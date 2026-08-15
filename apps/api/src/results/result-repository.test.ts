@@ -56,6 +56,13 @@ describe("result repository", () => {
 
     expect((await pool.query("SELECT file_name FROM videos WHERE id='v1'")).rows[0].file_name).toBe("clip.mp4");
   });
+
+  it("does not report held credits as billed history", async () => {
+    await seedRun({ userId: "u1", runId: "r1", mode: "standard" });
+    await pool.query("INSERT INTO credit_reservations (id,user_id,run_id,amount,status,idempotency_key,created_at) VALUES ('cr1','u1','r1',95,'held','ik',$1)", [now]);
+
+    await expect(createResultRepository(pool).findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ billedCredits: null });
+  });
 });
 
 async function seedRun(input: { userId: string; runId: string; mode: "standard" | "privacy"; originalDeleted?: boolean }) {

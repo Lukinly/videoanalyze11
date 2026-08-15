@@ -7,7 +7,7 @@ import { ResultActions } from "./ResultActions";
 const run: AnalysisRun = { id: "r1", videoId: "v1", fileName: "demo.mp4", duration: 120, status: "completed", stage: "completed", retentionMode: "standard", resultAvailability: "available", transcript: { mergeWarnings: [], segments: [] } };
 
 describe("result actions", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it("reattaches a matching local video without uploading or charging", async () => {
     const attach = vi.fn();

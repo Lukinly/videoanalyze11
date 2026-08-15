@@ -11,7 +11,8 @@ const metadataSelect = `SELECT run.id, run.user_id AS "userId", run.video_id AS 
   run.stage, run.status, run.progress, run.error, run.display_name AS "fileName",
   run.retention_mode AS "retentionMode", run.result_expires_at AS "resultExpiresAt",
   run.results_deleted_at AS "resultsDeletedAt", run.created_at AS "createdAt", run.updated_at AS "updatedAt",
-  video.duration, video.original_deleted_at AS "originalDeletedAt", reservation.amount::int AS "billedCredits"
+  video.duration, video.original_deleted_at AS "originalDeletedAt",
+  CASE WHEN reservation.status = 'consumed' THEN reservation.amount::int ELSE NULL END AS "billedCredits"
  FROM analysis_runs run JOIN videos video ON video.id = run.video_id
  LEFT JOIN credit_reservations reservation ON reservation.run_id = run.id`;
 

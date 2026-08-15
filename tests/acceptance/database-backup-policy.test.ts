@@ -48,6 +48,14 @@ describe("database backup policy", () => {
     expect(readFileSync(new URL("../../infra/backup/Dockerfile", import.meta.url), "utf8")).toContain("postgresql-client");
     expect(readFileSync(new URL("../../.gitignore", import.meta.url), "utf8")).toContain("*.dump.age");
   });
+
+  it("passes only backup-specific credentials into the backup container", () => {
+    const compose = readFileSync(new URL("../../infra/docker-compose.yml", import.meta.url), "utf8");
+    const backup = compose.match(/^ {2}backup:\n(?:(?!^ {2}[A-Za-z0-9._-]+:\s*$)[\s\S])*/m)?.[0] ?? "";
+    expect(backup).not.toContain("env_file:");
+    expect(backup).toContain("BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT}");
+    expect(backup).toContain("BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY}");
+  });
 });
 
 function executable(path: string, content: string) { writeFileSync(path, content); chmodSync(path, 0o755); }

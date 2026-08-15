@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import type { AnalysisRun, CreditBalance, PublicUser } from "../api/client";
 import { AnalysisProgress } from "../analysis/AnalysisProgress";
 import { Brand } from "../brand/Brand";
@@ -21,6 +21,9 @@ type WatchingWorkspaceProps = {
 
 export function WatchingWorkspace({ user, credits, video, run, playerRef, onCompleted, onLogout, onAttach, onDeleted }: WatchingWorkspaceProps) {
   const [currentTime, setCurrentTime] = useState(0);
+  useEffect(() => () => {
+    if (video.playbackUrl.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(video.playbackUrl);
+  }, [video.playbackUrl]);
 
   return <main className="watching-shell">
     <header className="topbar watching-topbar">

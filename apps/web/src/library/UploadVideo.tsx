@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { api, putUpload } from "../api/client";
 import type { RetentionMode } from "@videoanalyze/domain";
 
@@ -11,8 +11,6 @@ export function UploadVideo({ onUploaded, availableCredits }: { onUploaded: (vid
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retentionMode, setRetentionMode] = useState<RetentionMode>("standard");
-
-  useEffect(() => () => { if (file) URL.revokeObjectURL(URL.createObjectURL(file)); }, [file]);
 
   async function upload() {
     if (!file) return;

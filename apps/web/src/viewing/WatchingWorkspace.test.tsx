@@ -36,4 +36,16 @@ describe("WatchingWorkspace", () => {
     expect(player.muted).toBe(false);
     expect(player.volume).toBe(1);
   });
+
+  it("revokes an owned blob playback URL on unmount", () => {
+    const revoke = vi.fn();
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+    try {
+      const { unmount } = render(<WatchingWorkspace user={user} credits={credits} video={video} run={null} playerRef={createRef<PlayerController>()} onCompleted={vi.fn()} onLogout={vi.fn()} onAttach={vi.fn()} onDeleted={vi.fn()} />);
+      unmount();
+      expect(revoke).toHaveBeenCalledWith("blob:demo");
+    } finally {
+      Reflect.deleteProperty(URL, "revokeObjectURL");
+    }
+  });
 });
