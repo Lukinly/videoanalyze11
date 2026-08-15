@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import {
   assertStatus,
+  assertCompletedAnalysisArtifacts,
   buildSafeVerificationReport,
   extractSessionCookie,
   isTerminalAnalysisStatus,
@@ -118,5 +119,18 @@ describe("local upload and analysis verifier helpers", () => {
       chapterCount: 7
     });
     expect(JSON.stringify(report)).not.toMatch(/secret|private|storage|fileName|playbackUrl|transcript"/i);
+  });
+
+  it("requires notes, a duration billing snapshot, and exactly one matching charge without adding them to output", () => {
+    const detail = {
+      id: "run-1", transcript: { segments: [{}] }, summary: { chapters: [{}] }, notes: { sections: [{}] },
+      billingRuleVersion: "duration-tiered-v2", reservedCredits: 3
+    };
+    expect(() => assertCompletedAnalysisArtifacts(detail, [{ type: "analysis_charge", referenceId: "run-1", amount: -3 }])).not.toThrow();
+    expect(() => assertCompletedAnalysisArtifacts({ ...detail, notes: undefined }, [])).toThrow(/AI note/);
+    expect(() => assertCompletedAnalysisArtifacts(detail, [
+      { type: "analysis_charge", referenceId: "run-1", amount: -3 },
+      { type: "analysis_charge", referenceId: "run-1", amount: -3 }
+    ])).toThrow(/exactly once/);
   });
 });

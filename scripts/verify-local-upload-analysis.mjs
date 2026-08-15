@@ -83,6 +83,17 @@ export function buildSafeVerificationReport(value) {
   };
 }
 
+export function assertCompletedAnalysisArtifacts(detail, ledgerItems) {
+  if ((detail.transcript?.segments?.length ?? 0) < 1) throw new Error("completed analysis contains no transcript segments");
+  if ((detail.summary?.chapters?.length ?? 0) < 1) throw new Error("completed analysis contains no chapters");
+  if ((detail.notes?.sections?.length ?? 0) < 1) throw new Error("completed analysis contains no AI note sections");
+  if (detail.billingRuleVersion !== "duration-tiered-v2" || !Number.isSafeInteger(detail.reservedCredits) || detail.reservedCredits < 1) {
+    throw new Error("completed analysis does not contain a valid duration-tiered billing snapshot");
+  }
+  const charges = ledgerItems.filter((entry) => entry.type === "analysis_charge" && entry.referenceId === detail.id);
+  if (charges.length !== 1 || Number(charges[0].amount) !== -detail.reservedCredits) throw new Error("completed analysis was not charged exactly once");
+}
+
 async function requestJson(path, options = {}, expectedStatus = 200, cookie = "") {
   const response = await fetch(new URL(path, baseUrl), {
     ...options,
@@ -261,6 +272,8 @@ async function waitForTerminalLifecycle(cookie, videoId, terminal) {
     const detail = await requestJson(`/api/analysis-runs/${encodeURIComponent(terminal.runId)}`, {}, 200, cookie);
     const playback = await requestJson(`/api/videos/${encodeURIComponent(videoId)}/playback-url`, {}, [200, 410], cookie);
     if (playback.response.status === 410 && detail.body.originalDeletedAt && detail.body.resultAvailability === "available") {
+      const ledger = await requestJson("/api/credits/ledger?limit=100", {}, 200, cookie);
+      assertCompletedAnalysisArtifacts(detail.body, ledger.body.items ?? []);
       const report = buildSafeVerificationReport({
         ...terminal,
         originalDeleted: true,
@@ -268,7 +281,6 @@ async function waitForTerminalLifecycle(cookie, videoId, terminal) {
         transcriptSegmentCount: detail.body.transcript?.segments?.length ?? 0,
         chapterCount: detail.body.summary?.chapters?.length ?? 0
       });
-      if (report.transcriptSegmentCount < 1) throw new Error("completed analysis contains no transcript segments");
       return report;
     }
     await sleep(pollIntervalMs);
