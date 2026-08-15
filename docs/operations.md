@@ -62,6 +62,12 @@ The default input is `/mnt/v/Vworkspace/videoanlast/test.mp4`. Set `VIDEO_PATH` 
 
 `ORIGINAL_RETENTION_DAYS` defaults to 7 and `RESULT_RETENTION_DAYS` defaults to 30. Audio and chunk objects are temporary and are deleted after completion or cancellation. `MAX_UPLOAD_BYTES`, `MAX_VIDEO_DURATION_SECONDS`, `MAX_ACTIVE_RUNS_PER_USER`, and `GLOBAL_WORKER_CONCURRENCY` are read from environment variables and should be tuned to available CPU, storage, and provider quota.
 
+## Encrypted off-site database backups
+
+The `backup` Compose service runs once at startup and then daily. It streams a custom PostgreSQL dump directly through `age`, excludes data from every `public.ephemeral_*` table, and uploads only the encrypted `.dump.age` object to the independently configured backup S3 service. Daily objects are retained for seven days; Sunday copies are retained in the weekly prefix for 28 days (four weekly copies). Never reuse the media bucket credentials for backups, and keep the age identity outside the repository and container image.
+
+Quarterly, perform a restore drill in an isolated environment. Remove API traffic first and set `RESTORE_MAINTENANCE_MODE=1`; run `scripts/restore-database.sh` with `BACKUP_OBJECT` pointing to the selected encrypted object and `BACKUP_AGE_IDENTITY_FILE` pointing to the mounted private identity. The script restores PostgreSQL, applies migrations, and runs a one-shot retention sweep before it reports that traffic may resume. Verify expired privacy bodies are absent, ordinary results and billing ledger entries remain, and record only object dates/counts—not credentials, filenames, or result bodies—in the drill log.
+
 ## Health and security
 
 - `GET /healthz` is a liveness check.

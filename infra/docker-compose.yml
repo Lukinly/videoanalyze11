@@ -120,6 +120,19 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  backup:
+    build:
+      context: ..
+      dockerfile: infra/backup/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgres://videoanalyze:videoanalyze@postgres:5432/videoanalyze
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   web:
     build:
       context: ..

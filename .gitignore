@@ -11,3 +11,5 @@ coverage/
 /storage/
 *.log
 *.tsbuildinfo
+*.dump
+*.dump.age
