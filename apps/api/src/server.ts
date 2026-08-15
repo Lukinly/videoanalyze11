@@ -68,7 +68,7 @@ const queue = new Queue("video-analysis", { connection: redisConnection });
 const app = buildApp({
   authService,
   secureCookies: env.nodeEnv === "production",
-  uploadService: createUploadService({ videos: repositories.videos, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds }),
+  uploadService: createUploadService({ transientMedia: repositories.transientMedia, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds, transientCapacityBytes: env.transientCapacityBytes }),
   analysisService: createAnalysisService({ videos: repositories.videos, credits: repositories.credits, runs: repositories.runs, queue }),
   credits: repositories.credits,
   topups: repositories.admin,

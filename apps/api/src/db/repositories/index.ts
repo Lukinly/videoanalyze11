@@ -7,6 +7,7 @@ import { createAnalysisRunRepository } from "./analysis-runs.js";
 import { createSearchRepository } from "./search.js";
 import { createCreditRepository } from "./credits.js";
 import { createAdminRepository } from "./admin.js";
+import { createTransientMediaRepository } from "../../retention/transient-media-repository.js";
 
 export function createRepositories(pool: Pool) {
   return {
@@ -17,6 +18,7 @@ export function createRepositories(pool: Pool) {
     admin: createAdminRepository(pool),
     auth: createAuthRepository(pool),
     runs: createAnalysisRunRepository(pool),
-    search: createSearchRepository(pool)
+    search: createSearchRepository(pool),
+    transientMedia: createTransientMediaRepository(pool)
   };
 }

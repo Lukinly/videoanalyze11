@@ -13,6 +13,7 @@ describe("application configuration", () => {
       groqApiKey: "test-key",
       databaseUrl: "postgres://db",
       maxUploadBytes: 123,
+      transientCapacityBytes: 40_000_000_000,
       originalRetentionDays: 7,
       resultRetentionDays: 30
     });

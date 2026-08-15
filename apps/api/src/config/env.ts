@@ -12,6 +12,7 @@ export type AppEnv = {
   mailApiUrl: string;
   verificationBaseUrl: string;
   maxUploadBytes: number;
+  transientCapacityBytes: number;
   maxVideoDurationSeconds: number;
   maxActiveRunsPerUser: number;
   globalWorkerConcurrency: number;
@@ -41,6 +42,7 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
     mailApiUrl: source.MAIL_API_URL ?? "http://127.0.0.1:8025/api/v1/send",
     verificationBaseUrl: source.VERIFICATION_BASE_URL ?? "http://localhost:5173",
     maxUploadBytes: positiveInteger(source.MAX_UPLOAD_BYTES, 2_000_000_000),
+    transientCapacityBytes: positiveInteger(source.TEMP_MEDIA_CAPACITY_BYTES, 40_000_000_000),
     maxVideoDurationSeconds: positiveInteger(source.MAX_VIDEO_DURATION_SECONDS, 7_200),
     maxActiveRunsPerUser: positiveInteger(source.MAX_ACTIVE_RUNS_PER_USER, 2),
     globalWorkerConcurrency: positiveInteger(source.GLOBAL_WORKER_CONCURRENCY, 2),
