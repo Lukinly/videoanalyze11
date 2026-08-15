@@ -10,7 +10,7 @@ export function ResultActions({ run, onAttach, onDeleted, inspectLocalFile = ins
 }) {
   const localUrl = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => () => { if (localUrl.current) URL.revokeObjectURL(localUrl.current); }, []);
+  useEffect(() => () => { if (localUrl.current) revokeObjectUrl(localUrl.current); }, []);
 
   async function attach(file?: File) {
     if (!file) return;
@@ -18,15 +18,15 @@ export function ResultActions({ run, onAttach, onDeleted, inspectLocalFile = ins
     try {
       const duration = await inspectLocalFile(file, url);
       if (run.duration != null && Math.abs(duration - run.duration) > 2 && !window.confirm("视频时长与原文件不一致，仍然使用此文件？")) {
-        URL.revokeObjectURL(url);
+        revokeObjectUrl(url);
         return;
       }
-      if (localUrl.current) URL.revokeObjectURL(localUrl.current);
+      if (localUrl.current) revokeObjectUrl(localUrl.current);
       localUrl.current = url;
       setError(null);
       onAttach(url, file.name);
     } catch (cause) {
-      URL.revokeObjectURL(url);
+      revokeObjectUrl(url);
       setError(cause instanceof Error ? cause.message : "无法读取本地视频");
     }
   }
@@ -37,7 +37,7 @@ export function ResultActions({ run, onAttach, onDeleted, inspectLocalFile = ins
     link.href = url;
     link.download = `${safeName(run.fileName ?? "analysis")}.md`;
     link.click();
-    URL.revokeObjectURL(url);
+    revokeObjectUrl(url);
   }
 
   async function deleteResults() {
@@ -66,4 +66,8 @@ function inspectDuration(_file: File, url: string): Promise<number> {
 
 function safeName(value: string) {
   return value.replace(/\.[^.]+$/, "").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^-+|-+$/g, "") || "analysis";
+}
+
+function revokeObjectUrl(url: string) {
+  if (typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(url);
 }

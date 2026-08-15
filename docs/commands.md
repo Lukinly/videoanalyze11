@@ -125,7 +125,7 @@ curl http://localhost/readyz       # 依赖就绪检查（数据库/Redis/对象
 
 ## 本地端到端上传+分析验证
 
-走真实后端流水线验证一个 MP4 上传到分析完成：
+走真实后端流水线验证一个 MP4 上传到分析完成、原片删除且文字结果仍可读取：
 
 ```bash
 NODE_EXTRA_CA_CERTS="$PWD/.local/videoanalyze-local-root.crt" \
@@ -148,8 +148,14 @@ env -u NODE_USE_ENV_PROXY -u http_proxy -u https_proxy -u all_proxy \
   corepack pnpm verify:local-upload-analysis
 ```
 
-配置了摘要 LLM（`llm_api_key` 等）时，本脚本会连带验证 v1 摘要写入，
-脚本结束后可用 SQL 检查 `analysis_runs.summary_json` 与 `chapters` 表。
+成功时脚本只输出一行安全 JSON，不输出邮箱、文件名、URL、凭据或正文：
+
+```json
+{"runId":"…","terminalStatus":"completed","originalDeleted":true,"resultAvailability":"available","transcriptSegmentCount":281,"chapterCount":7}
+```
+
+配置了摘要 LLM（`llm_api_key` 等）时，`chapterCount` 应大于零；未配置摘要时可为零。
+`originalDeleted: true` 与 `resultAvailability: "available"` 同时出现，表示原片和文字结果的生命周期已经解耦。
 
 常用环境变量：
 
@@ -189,4 +195,7 @@ Redis 默认只在容器网络内暴露，未映射到宿主。
 | `MAX_VIDEO_DURATION_SECONDS` | 视频时长上限，默认 7200 |
 | `MAX_ACTIVE_RUNS_PER_USER` | 每用户并发分析数，默认 2 |
 | `GLOBAL_WORKER_CONCURRENCY` | worker 全局并发，默认 2 |
-| `ORIGINAL_RETENTION_DAYS` / `RESULT_RETENTION_DAYS` | 原片/结果保留天数，默认 7 / 30 |
+| `ORIGINAL_RETENTION_DAYS` / `RESULT_RETENTION_DAYS` | 兼容配置；终态原片立即清理，标准结果长期保留，隐私结果完成后保留 24 小时 |
+| `TRANSIENT_MEDIA_CAPACITY_BYTES` | 临时媒体容量预算；预计使用量超过 80% 时拒绝新上传，历史结果仍可读取 |
+| `RETENTION_SWEEP_INTERVAL_SECONDS` | 清理扫描间隔；处理孤立上传、清理重试、陈旧任务和隐私结果到期 |
+| `BACKUP_AGE_RECIPIENT` / `BACKUP_S3_*` | age 加密异地备份；备份排除所有 `ephemeral_*` 表数据 |

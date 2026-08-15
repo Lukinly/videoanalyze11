@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import {
   assertStatus,
+  buildSafeVerificationReport,
   extractSessionCookie,
   isTerminalAnalysisStatus,
   lookupLocalStorage,
@@ -92,5 +93,30 @@ describe("local upload and analysis verifier helpers", () => {
 
   it("throws a useful error for an unexpected status", () => {
     expect(() => assertStatus(500, "internal error", 201)).toThrow(/expected HTTP 201, got 500/);
+  });
+
+  it("emits only lifecycle IDs, statuses, and aggregate counts", () => {
+    const report = buildSafeVerificationReport({
+      runId: "run-1",
+      terminalStatus: "completed",
+      originalDeleted: true,
+      resultAvailability: "available",
+      transcriptSegmentCount: 281,
+      chapterCount: 7,
+      email: "secret@example.test",
+      fileName: "private-meeting.mp4",
+      playbackUrl: "https://storage.localhost/private?X-Amz-Signature=secret",
+      transcript: { segments: [{ text: "private body" }] }
+    });
+
+    expect(report).toEqual({
+      runId: "run-1",
+      terminalStatus: "completed",
+      originalDeleted: true,
+      resultAvailability: "available",
+      transcriptSegmentCount: 281,
+      chapterCount: 7
+    });
+    expect(JSON.stringify(report)).not.toMatch(/secret|private|storage|fileName|playbackUrl|transcript"/i);
   });
 });

@@ -1,6 +1,6 @@
 # videoanalyze 项目总结
 
-> 更新日期：2026-08-11 · 分支：`feature/v0-v1-web`
+> 更新日期：2026-08-15 · 分支：`codex/transient-retention-ai-notes`
 > 本文是项目结构与技术链的完整梳理，用于交接、复盘与后续开发索引。
 
 ---
@@ -26,7 +26,7 @@
 
 | 设计层 | 实际模块 | 说明 |
 |---|---|---|
-| UI 层 | `apps/web` | React 单页应用，播放器 + 摘要/章节/转写/搜索面板 |
+| UI 层 | `apps/web` | React 单页应用，播放器 + 历史恢复 + 摘要/章节/转写/搜索/导出面板 |
 | 服务编排层 | `apps/api` | Fastify HTTP 服务：认证、上传、额度、任务入队、SSE、搜索、管理 |
 | 任务/媒体处理层 | `apps/worker` | BullMQ 消费端：ffmpeg 抽音频、切片、Groq 转写、LLM 摘要 |
 | AI 服务层 | `apps/worker/src/providers` | Groq ASR / DeepSeek（Anthropic 兼容）摘要，抽象为 `AsrProvider` / `SummaryProvider` |
@@ -53,6 +53,8 @@ packages/domain ──► apps/api   （schema / DomainError / 契约）
                                               │           │
                                           worker ◄──BullMQ 队列（Redis）── api
                                           (ffmpeg + Groq + DeepSeek)
+                                              │
+                                      retention sweep（临时媒体/隐私结果）
 ```
 
 - 一次性服务：`migrate`（按编号顺序执行 SQL 迁移）、`minio-init`（建桶）
@@ -76,6 +78,8 @@ videoanlast/
 │   │       ├── analysis/        # analysis-service（入队、额度预留）/ credit-cost
 │   │       ├── events/          # progress-hub（进程内 SSE 广播）
 │   │       ├── search/          # search-service（pg_trgm GIN / ILIKE）
+│   │       ├── results/         # 结果历史、详情、删除与生命周期门禁
+│   │       ├── retention/       # 临时对象容量统计与并发容量闸门
 │   │       ├── db/
 │   │       │   ├── migrations/  # 0001~0004 SQL（只增不改）
 │   │       │   ├── repositories/# 纯 SQL 仓储（users/videos/credits/admin/auth/analysis-runs/search）
@@ -91,14 +95,15 @@ videoanlast/
 │   │       ├── summary/         # v1-runner / token-budget / windowing / alignment
 │   │       ├── media/           # ffmpeg(参数构建) / ffprobe / process-runner / playback-compatibility
 │   │       ├── providers/       # groq-asr(+curl 传输) / anthropic-summary / groq-summary / http-client / summary-prompt
-│   │       └── retention/       # cleanup-worker（扫描过期对象，未接线）
+│   │       └── retention/       # 终态清理、定时 sweep、陈旧任务与隐私结果清理
 │   └── web/                     # @videoanalyze/web — 前端
 │       └── src/
 │           ├── app.tsx          # 无路由库，路径条件渲染 + 会话门控
 │           ├── api/client.ts    # fetch 封装 / ApiError / SSE / XHR PUT 上传
 │           ├── player/          # VideoPlayer.tsx（原生 <video> + PlayerController ref）
 │           ├── auth/            # Login / Register(验证码) / VerifyEmail / ResetPassword
-│           ├── library/         # UploadVideo.tsx
+│           ├── library/         # 上传保留模式 + AnalysisHistory 历史列表
+│           ├── viewing/         # 历史工作区、本地挂载、导出与永久删除
 │           ├── analysis/        # AnalysisProgress.tsx（SSE + 1s 轮询兜底）
 │           ├── summary/ chapters/ search/ transcript/ credits/ admin/
 │           └── styles.css       # 单文件全局样式（无 CSS 框架）
@@ -144,7 +149,9 @@ videoanlast/
 | `/api/auth/*` | POST | 注册验证码(60s 限频)/注册/登录/登出/改密/重置 |
 | `/api/videos/upload-session` | POST | 建视频行 + 预签名 PUT URL（900s） |
 | `/api/videos/:id/analysis-runs` | POST | 额度预留 + 建 run + 入队 |
-| `/api/analysis-runs/:id` | GET / POST cancel / GET events | 查询（含 transcript+summary）/ 取消 / SSE |
+| `/api/analysis-runs` | GET | 当前用户结果历史（含可用/到期/已删除状态） |
+| `/api/analysis-runs/:id` | GET / POST cancel / GET events | 查询持久结果 / 取消 / SSE；到期或删除返回 410 |
+| `/api/analysis-runs/:id/results` | DELETE | 永久删除正文与检索内容，保留最小审计和计费快照 |
 | `/api/analysis-runs/:id/search` | GET | 全转录 + 章节全文检索 |
 | `/api/videos/:id/playback-url` | GET | 预签名下载 URL（900s） |
 | `/api/videos/:id` | DELETE | 删除对象 + 标记 deleted |
@@ -157,7 +164,7 @@ videoanlast/
 ### 4.3 `apps/worker` — 分析流水线
 
 - 技术栈：**bullmq Worker**（并发 `GLOBAL_WORKER_CONCURRENCY` 默认 2）+ **ioredis** + **pg** + **@aws-sdk/client-s3**；ffmpeg/ffprobe 用系统二进制（Docker apt 安装，无 npm 包）
-- 每 job 编排（worker-main）：`v0 转写 → v1 摘要（可选）→ completed → 结算信用点`；异常→ `settleAnalysisFailure` + 直接写 cancelled/failed
+- 每 job 编排（worker-main）：`v0 转写 → v1 摘要（可选）→ completed → 结算信用点 → 清理原片/音频/切片`；异常终态同样先持久化和结算，再清理临时媒体
 - **V0 转写**（`analysis/v0-runner.ts`）：`probing(0.02) → extracting_audio(0.1) → transcribing(0.2) → merging_transcript(0.95)`
   1. `ffmpeg` 抽音频：`-ar 16000 -ac 1 -map 0:a:0 -c:a flac`（**单声道 16kHz FLAC**）
   2. 切片（`chunk-manifest.ts`）：600s/块、8s 重叠、`maxBytes 20MB`；超限递归二分——保证单请求低于 **Groq 25MiB 上限**
@@ -178,7 +185,8 @@ videoanlast/
   - `request<T>`：fetch 封装，`credentials:"include"`（cookie 会话），非 2xx 抛 `ApiError(status, code)`
   - `putUpload`：**XHR PUT** 直传预签名 URL（带上传进度），不走 fetch
   - `subscribeToAnalysis`：`EventSource` SSE `/events`，监听 `progress` 事件
-- 上传流程：额度前端预估（1 信用点/10MB）→ `createUploadSession` 拿预签名 URL → XHR 直传 `storage.localhost` → 播放本地 blob URL → `startAnalysis`
+- 上传流程：选择标准/隐私结果模式 → 额度前端预估 → `createUploadSession` 拿预签名 URL → XHR 直传 `storage.localhost` → 播放本地 blob URL → `startAnalysis`
+- 历史恢复：新客户端按 run ID 读取持久文字结果；原片已清理时可重新选择本地文件，仅创建 blob URL，不上传也不计费；时长误差超过 2 秒需确认
 - 进度展示：**SSE 为主 + 1s 轮询兜底**，阶段中文映射（`transcribing→转写中` 等），断线 1.5s 重连
 - 交互闭环：`playerRef.current?.seek(seconds)` 由 ChapterList / TranscriptPanel / SearchPanel 的 `onSeek` 回调触发；转录超 500 段自动虚拟滚动
 
@@ -189,8 +197,11 @@ videoanlast/
   - `0002_credit_billing_admin`：角色/状态字段 + 信用台账/预留/充值申请/审计/重置 token
   - `0003_registration_verifications`：注册邮箱验证码
   - `0004_summary_results`：`analysis_runs.summary_json` + `chapters.alignment_warning`（V1 摘要）
+  - `0005~0007`：临时对象/结果生命周期、隐私 `ephemeral_*` 表、清理租约与稳定失败分类
 - 三个部署阶段：本地（internal CA）→ 服务器 IP 临时验证 → 域名 HTTPS（Caddy 自动证书）
-- 保留策略：原片 7 天 / 结果 30 天；音频与 chunk 为临时对象
+- 保留策略：孤立上传最多 24 小时；任务终态后原片、音频和 chunk 立即清理并可重试；标准文字结果保留，隐私文字结果完成后 24 小时到期；用户可提前永久删除正文
+- 容量保护：临时媒体预计占用超过配置容量的 80% 时拒绝新上传，但历史读取保持可用
+- 备份：`pg_dump` 流式进入 age 加密，再上传到独立 S3；不产生明文 dump，且排除所有 `ephemeral_*` 表数据
 
 ---
 
@@ -239,11 +250,11 @@ worker
 ## 7. 测试与验证策略
 
 - **单元测试**：Vitest，160 个用例全绿。DB 测试用 **pg-mem** + `test-database.ts` 并行 schema；服务/路由测试用 DI 注入 fake；`media.integration.test.ts` 跑真实 ffmpeg（lavfi 1s fixture）
-- **验收测试**（`tests/acceptance/`，31 个）：`deployment-config`（Compose/环境一致性）、`setup-local-https`、`v0-v1.acceptance`（转写+摘要场景）、`verify-local-upload-analysis`（真实 E2E：注册→上传→等待分析→查库）
-- **真实 E2E**：`corepack pnpm verify:local-upload-analysis`（需 Groq key，脚本只报 id/数量，不泄密钥/签名 URL）；代理清理与免 sudo 写法见 `docs/commands.md`
+- **验收测试**（`tests/acceptance/`）：除部署、HTTPS 和 V0/V1 外，覆盖断线后恢复、终态原片删除、隐私 24 小时到期、永久删除保留账本、80% 容量闸门、重复清理隔离与零上传本地挂载
+- **真实 E2E**：`corepack pnpm verify:local-upload-analysis`（需 Groq key）；成功输出只含 run ID、终态、原片删除/结果可用状态与聚合数量
 - **质量门槛**：`typecheck` / `lint` / `build` / `test` / `test:acceptance` / `docker compose config --quiet`
 
-当前验证记录：test.mp4（约 638s）→ 281 转写片段 → DeepSeek 生成 7 章，章节时间真实且 `alignment_warning=false`。
+发布前以当前分支的全量命令结果为准；真实验证的安全输出格式与代理清理方式见 `docs/commands.md`。
 
 ---
 
@@ -256,13 +267,17 @@ worker
 - ✅ V1：DeepSeek 摘要（单次/map-reduce）+ 章节对齐 + 前端展示与点击跳转
 - ✅ 信用点记账/预留/结算、管理员后台、充值审批、搜索（pg_trgm）
 - ✅ 本地 HTTPS、Caddy 反代、迁移链、部署文档
+- ✅ 临时媒体容量闸门、终态清理/重试、陈旧任务回收与计费对账
+- ✅ 标准/隐私结果隔离、历史恢复、24 小时隐私到期、永久删除与 Markdown 导出
+- ✅ 排除隐私正文的 age 加密异地数据库备份和维护模式恢复
 
-待办/后续（设计文档 V2/V3）：
-- 当前播放片段高亮、历史记录、多音轨选择
-- 导出 Markdown / SRT / JSON
+待办/后续（下一阶段设计）：
+- `duration-tiered-v2` 阶梯积分、服务端真实时长计费与不可变计费快照
+- 单视频上限 4 小时、长视频队列/FFmpeg/ETA 保护
+- 默认详细 AI 笔记、map-reduce、独立笔记页/目录/时间戳跳转和 Markdown/纯文本下载
+- 当前播放片段高亮、多音轨选择、SRT / JSON 导出
 - MKV remux → MP4 验证（playback-compatibility 已就绪未接线）
 - 离线 faster-whisper、说话人识别、翻译
-- `cleanup-worker`（对象过期清理）尚未接线；API 仓储与 `test-database.ts` 需随迁移同步维护
 
 ---
 

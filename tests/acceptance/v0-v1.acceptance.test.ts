@@ -63,7 +63,7 @@ async function runAcceptanceScenario(scenario: typeof requiredScenarios[number])
     }
     case "429 and network timeout retry without leaking secrets": {
       const summary = { capabilities: vi.fn().mockResolvedValue({ contextWindow: 10_000, structuredOutput: true }), summarize: vi.fn().mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce({ oneLineSummary: "ok", overallSummary: "ok", chapters: [] }) };
-      const state = { getTranscript: vi.fn().mockResolvedValue({ duration: 1, segments: [] }), setStage: vi.fn(), saveSummary: vi.fn() };
+      const state = { getTranscript: vi.fn().mockResolvedValue({ duration: 1, segments: [] }), setStage: vi.fn().mockResolvedValue(true), saveSummary: vi.fn() };
       await createV1SummaryRunner({ summary, state }).run({ runId: "r1" });
       expect(summary.summarize).toHaveBeenCalledTimes(2);
       return { status: "passed" as const };
@@ -131,6 +131,6 @@ function createResumeState() {
     completedChunkIndexes,
     async getRun() { return { inputVideoPath: "/tmp/video.mp4", audioPath: "/tmp/audio.flac", duration: 20 }; },
     async getChunks() { return [{ index: 0, start: 0, end: 10, status: "completed" as const, transcript: [{ start: 0, end: 1, text: "done" }] }, { index: 1, start: 10, end: 20, status: "pending" as const, transcript: null }]; },
-    async setStage() {}, async markChunkProcessing() {}, async saveChunkTranscript() {}, async markChunkCompleted(_runId: string, index: number) { completedChunkIndexes.push(index); }, async saveTranscript() {}
+    async setStage() { return true; }, async markChunkProcessing() {}, async saveChunkTranscript() {}, async markChunkCompleted(_runId: string, index: number) { completedChunkIndexes.push(index); }, async saveTranscript() {}
   };
 }
