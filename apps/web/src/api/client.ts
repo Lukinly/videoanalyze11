@@ -54,7 +54,6 @@ export type UploadSession = {
   uploadUrl: string;
   expiresAt: string;
   fileSize: number;
-  estimatedCost: number;
 };
 
 export class ApiError extends Error {

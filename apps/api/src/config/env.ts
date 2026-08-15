@@ -43,7 +43,7 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
     verificationBaseUrl: source.VERIFICATION_BASE_URL ?? "http://localhost:5173",
     maxUploadBytes: positiveInteger(source.MAX_UPLOAD_BYTES, 2_000_000_000),
     transientCapacityBytes: positiveInteger(source.TEMP_MEDIA_CAPACITY_BYTES, 40_000_000_000),
-    maxVideoDurationSeconds: positiveInteger(source.MAX_VIDEO_DURATION_SECONDS, 7_200),
+    maxVideoDurationSeconds: positiveInteger(source.MAX_VIDEO_DURATION_SECONDS, 14_400),
     maxActiveRunsPerUser: positiveInteger(source.MAX_ACTIVE_RUNS_PER_USER, 2),
     globalWorkerConcurrency: positiveInteger(source.GLOBAL_WORKER_CONCURRENCY, 2),
     originalRetentionDays: positiveInteger(source.ORIGINAL_RETENTION_DAYS, 7),

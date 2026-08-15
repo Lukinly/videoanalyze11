@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 describe("analysis service", () => {
-  it("reserves the stored video size cost and enqueues one idempotent run", async () => {
+  it("enqueues an unpaid run whose exact cost waits for the server duration probe", async () => {
     const { createAnalysisService } = await import("./analysis-service.js");
     const dependencies = {
       videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1", fileName: "recording.mp4", fileSize: 100_000_000 }) },
-      credits: { reserveAnalysis: vi.fn().mockResolvedValue("held"), releaseReservation: vi.fn() },
       runs: {
         create: vi.fn().mockImplementation(async (input: { id: string }) => ({ id: input.id, status: "queued" })),
         findOwnedById: vi.fn(),
@@ -18,8 +17,7 @@ describe("analysis service", () => {
     const result = await service.start({ userId: "user_1", videoId: "video_1" });
 
     expect(result.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(result.estimatedCost).toBe(10);
-    expect(dependencies.credits.reserveAnalysis).toHaveBeenCalledWith({ userId: "user_1", runId: result.id, amount: 10 });
+    expect(result).toMatchObject({ billingStatus: "pending_duration_probe" });
     expect(dependencies.runs.create).toHaveBeenCalledWith({ id: result.id, userId: "user_1", videoId: "video_1", displayName: "recording.mp4", retentionMode: "standard" });
     expect(dependencies.queue.add).toHaveBeenCalledWith("analysis", expect.objectContaining({ runId: result.id }), expect.objectContaining({ jobId: result.id }));
   });
@@ -28,7 +26,6 @@ describe("analysis service", () => {
     const { createAnalysisService } = await import("./analysis-service.js");
     const dependencies = {
       videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1", fileName: "private meeting.mp4", fileSize: 20_000_000 }) },
-      credits: { reserveAnalysis: vi.fn().mockResolvedValue("held"), releaseReservation: vi.fn() },
       runs: {
         create: vi.fn().mockImplementation(async (input: { id: string }) => ({ id: input.id, status: "queued" })),
         findOwnedById: vi.fn(),
@@ -43,30 +40,15 @@ describe("analysis service", () => {
     expect(dependencies.runs.create).toHaveBeenCalledWith({ id: result.id, userId: "user_1", videoId: "video_1", displayName: "private meeting.mp4", retentionMode: "privacy" });
   });
 
-  it("rejects an analysis when no credit is available", async () => {
-    const { createAnalysisService } = await import("./analysis-service.js");
-    const dependencies = {
-      videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1", fileSize: 100_000_000 }) },
-      credits: { reserveAnalysis: vi.fn().mockResolvedValue("exhausted"), releaseReservation: vi.fn() },
-      runs: { create: vi.fn(), findOwnedById: vi.fn(), requestCancellation: vi.fn() },
-      queue: { add: vi.fn() }
-    };
-
-    await expect(createAnalysisService(dependencies).start({ userId: "user_1", videoId: "video_1" }))
-      .rejects.toMatchObject({ code: "CREDITS_EXHAUSTED" });
-    expect(dependencies.runs.create).not.toHaveBeenCalled();
-  });
-
-  it("releases a held reservation when run creation fails", async () => {
+  it("does not create a file-size reservation when run creation fails", async () => {
     const { createAnalysisService } = await import("./analysis-service.js");
     const dependencies = {
       videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "video_1", userId: "user_1", fileSize: 20_000_000 }) },
-      credits: { reserveAnalysis: vi.fn().mockResolvedValue("held"), releaseReservation: vi.fn().mockResolvedValue(undefined) },
       runs: { create: vi.fn().mockRejectedValue(new Error("database unavailable")), findOwnedById: vi.fn(), requestCancellation: vi.fn() },
       queue: { add: vi.fn() }
     };
 
     await expect(createAnalysisService(dependencies).start({ userId: "user_1", videoId: "video_1" })).rejects.toThrow("database unavailable");
-    expect(dependencies.credits.releaseReservation).toHaveBeenCalledWith(expect.any(String), "analysis creation failed");
+    expect(dependencies.queue.add).not.toHaveBeenCalled();
   });
 });

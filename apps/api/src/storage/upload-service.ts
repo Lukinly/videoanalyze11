@@ -3,7 +3,6 @@ import { DomainError } from "@videoanalyze/domain";
 import type { ObjectStorage } from "./object-storage.js";
 import { createOriginalVideoKey } from "./object-keys.js";
 import { validateUploadInput } from "./upload-validation.js";
-import { calculateAnalysisCost } from "../credits/credit-cost.js";
 
 type TransientMediaRepository = {
   getLiveBytes(): Promise<number>;
@@ -53,7 +52,7 @@ export function createUploadService(dependencies: {
         expiresAt
       });
       const upload = await dependencies.storage.createUpload({ objectKey, contentType: input.contentType, contentLength: input.contentLength });
-      return { videoId, objectKey, uploadUrl: upload.uploadUrl, expiresAt: upload.expiresAt, fileSize: input.contentLength, estimatedCost: calculateAnalysisCost(input.contentLength) };
+      return { videoId, objectKey, uploadUrl: upload.uploadUrl, expiresAt: upload.expiresAt, fileSize: input.contentLength };
     }
   };
 }

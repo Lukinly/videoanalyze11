@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAuthService } from "../../apps/api/src/auth/auth-service.js";
-import { createAnalysisService } from "../../apps/api/src/analysis/analysis-service.js";
 import { createSearchService } from "../../apps/api/src/search/search-service.js";
 import { cleanupExpiredObjects } from "../../apps/worker/src/retention/cleanup-worker.js";
 import { createV0AnalysisRunner } from "../../apps/worker/src/analysis/v0-runner.js";
@@ -10,7 +9,7 @@ import { parseFfprobeJson } from "../../apps/worker/src/media/ffprobe.js";
 
 const requiredScenarios = [
   "verified user receives exactly twelve credits",
-  "unverified user cannot analyze",
+  "insufficient exact-duration credits stop before paid providers",
   "two users cannot read each other's videos",
   "completed ASR chunks are not resubmitted after restart",
   "429 and network timeout retry without leaking secrets",
@@ -39,14 +38,15 @@ async function runAcceptanceScenario(scenario: typeof requiredScenarios[number])
       expect(memory.credits).toBe(12);
       return { status: "passed" as const };
     }
-    case "unverified user cannot analyze": {
-      const result = createAnalysisService({
-        videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "v1", userId: "u1", fileSize: 1 }) },
-        credits: { reserveAnalysis: vi.fn().mockResolvedValue("exhausted"), releaseReservation: vi.fn() },
-        runs: { create: vi.fn(), findOwnedById: vi.fn(), requestCancellation: vi.fn() },
-        queue: { add: vi.fn() }
-      });
-      await expect(result.start({ userId: "u1", videoId: "v1" })).rejects.toMatchObject({ code: "CREDITS_EXHAUSTED" });
+    case "insufficient exact-duration credits stop before paid providers": {
+      const state = createResumeState();
+      state.ensureBilling = vi.fn().mockRejectedValue(new Error("credits exhausted"));
+      const asr = { transcribeChunk: vi.fn() };
+      const media = { extractAudio: vi.fn(), renderChunk: vi.fn() };
+      await expect(createV0AnalysisRunner({ asr, media, state }).run({ userId: "u1", videoId: "v1", runId: "r1", signal: new AbortController().signal }))
+        .rejects.toThrow("credits exhausted");
+      expect(media.extractAudio).not.toHaveBeenCalled();
+      expect(asr.transcribeChunk).not.toHaveBeenCalled();
       return { status: "passed" as const };
     }
     case "two users cannot read each other's videos": {
@@ -130,6 +130,7 @@ function createResumeState() {
   return {
     completedChunkIndexes,
     async getRun() { return { inputVideoPath: "/tmp/video.mp4", audioPath: "/tmp/audio.flac", duration: 20 }; },
+    async ensureBilling() { return { billingRuleVersion: "duration-tiered-v2", billedDurationSeconds: 20, billedMinutes: 1, reservedCredits: 1 }; },
     async getChunks() { return [{ index: 0, start: 0, end: 10, status: "completed" as const, transcript: [{ start: 0, end: 1, text: "done" }] }, { index: 1, start: 10, end: 20, status: "pending" as const, transcript: null }]; },
     async setStage() { return true; }, async markChunkProcessing() {}, async saveChunkTranscript() {}, async markChunkCompleted(_runId: string, index: number) { completedChunkIndexes.push(index); }, async saveTranscript() {}
   };

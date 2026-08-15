@@ -1,14 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { DomainError, type RetentionMode } from "@videoanalyze/domain";
-import { calculateAnalysisCost } from "../credits/credit-cost.js";
 
 type AnalysisRepositories = {
   videos: { findOwnedById(userId: string, videoId: string): Promise<{ id: string; userId: string; fileName: string; fileSize: number } | null> };
-  credits: {
-    reserveAnalysis(input: { userId: string; runId: string; amount: number }): Promise<"held" | "already_held" | "exhausted">;
-    releaseReservation(runId: string, reason: string): Promise<void>;
-    getBalance?: (userId: string) => Promise<{ ledgerBalance: number; held: number; available: number }>;
-  };
   runs: {
     create(input: { id: string; userId: string; videoId: string; displayName: string; retentionMode: RetentionMode }): Promise<{ id: string; status: string }>;
     findOwnedById(userId: string, runId: string): Promise<{ id: string } | null>;
@@ -23,29 +17,10 @@ export function createAnalysisService(dependencies: AnalysisRepositories & { que
       if (!video) throw new DomainError("NOT_FOUND", "video not found", 404);
       const retentionMode = input.retentionMode ?? "standard";
 
-      const estimatedCost = calculateAnalysisCost(Number(video.fileSize));
       const runId = randomUUID();
-      const reservation = await dependencies.credits.reserveAnalysis({ userId: input.userId, runId, amount: estimatedCost });
-      if (reservation === "exhausted") {
-        const balance = await dependencies.credits.getBalance?.(input.userId);
-        throw new DomainError("CREDITS_EXHAUSTED", `需要 ${estimatedCost} 积分，当前可用 ${balance?.available ?? 0} 积分`, 402);
-      }
-      if (reservation === "already_held") {
-        throw new DomainError("ANALYSIS_CONFLICT", "analysis reservation already exists", 409);
-      }
-
-      try {
-        const run = await dependencies.runs.create({ id: runId, userId: input.userId, videoId: video.id, displayName: video.fileName, retentionMode });
-        await dependencies.queue.add("analysis", { userId: input.userId, videoId: video.id, runId }, { jobId: runId });
-        return { ...run, estimatedCost };
-      } catch (error) {
-        try {
-          await dependencies.credits.releaseReservation(runId, "analysis creation failed");
-        } catch {
-          // Preserve the original API/queue error; the recovery worker can release it later.
-        }
-        throw error;
-      }
+      const run = await dependencies.runs.create({ id: runId, userId: input.userId, videoId: video.id, displayName: video.fileName, retentionMode });
+      await dependencies.queue.add("analysis", { userId: input.userId, videoId: video.id, runId }, { jobId: runId });
+      return { ...run, billingStatus: "pending_duration_probe" as const };
     },
     async get(input: { userId: string; runId: string }): Promise<{ id: string }> {
       const run = await dependencies.runs.findOwnedById(input.userId, input.runId);

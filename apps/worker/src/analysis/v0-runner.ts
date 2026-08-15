@@ -14,6 +14,7 @@ type ChunkState = {
 
 type RunnerState = {
   getRun(runId: string): Promise<{ inputVideoPath: string; audioPath: string; duration: number }>;
+  ensureBilling(runId: string, durationSeconds: number): Promise<unknown>;
   getChunks(runId: string): Promise<ChunkState[]>;
   setStage(runId: string, stage: string, progress?: number): Promise<boolean>;
   markChunkProcessing(runId: string, index: number): Promise<void>;
@@ -35,6 +36,7 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
       await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
       await requireStageUpdate(() => dependencies.state.setStage(input.runId, "probing", 0.02));
       const run = await dependencies.state.getRun(input.runId);
+      await dependencies.state.ensureBilling(input.runId, run.duration);
       await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
       await requireStageUpdate(() => dependencies.state.setStage(input.runId, "extracting_audio", 0.1));
       await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);

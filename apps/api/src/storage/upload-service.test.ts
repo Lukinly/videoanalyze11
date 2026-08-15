@@ -14,7 +14,7 @@ describe("upload service", () => {
     const result = await service.start({ userId: "user_1", fileName: "../../secret.mp4", contentType: "video/mp4", contentLength: 100 });
 
     expect(result.videoId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(result.estimatedCost).toBe(1);
+    expect(result).not.toHaveProperty("estimatedCost");
     expect(transientMedia.createTrackedOriginal).toHaveBeenCalledWith(expect.objectContaining({
       userId: "user_1",
       objectKey: expect.stringMatching(/^users\/user_1\/videos\/[a-z0-9-]+\/original$/),

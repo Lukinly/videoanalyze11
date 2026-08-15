@@ -84,7 +84,7 @@ const consumer = createAnalysisConsumer({
   runner: {
     async run(job: AnalysisJob & { signal: AbortSignal }) {
       const directory = validatedRunDirectory(job.runId);
-      const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, clock });
+      const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, credits, clock });
       await runAnalysisToTerminal({
         async runAndPersist() {
           await createV0AnalysisRunner({ asr, media, state }).run(job);
@@ -148,6 +148,7 @@ function createDatabaseState(input: {
   directory: string;
   media: ReturnType<typeof createMediaProcessor>;
   results: ResultStore;
+  credits: ReturnType<typeof createWorkerCreditRepository>;
   clock: { now(): Date };
 }) {
   async function getResultContext(runId: string) {
@@ -173,6 +174,12 @@ function createDatabaseState(input: {
   }
 
   return {
+    async ensureBilling(runId: string, durationSeconds: number) {
+      const context = await getResultContext(runId);
+      const snapshot = await input.credits.reserveForDuration({ runId, userId: context.userId, durationSeconds });
+      if (snapshot === "exhausted") throw new Error("credits exhausted for server-probed video duration");
+      return snapshot;
+    },
     async getRun(runId: string) {
       const result = await input.pool.query<{ userId: string; objectKey: string; duration: number | null }>(
         `SELECT ar.user_id AS "userId", v.object_key AS "objectKey", v.duration

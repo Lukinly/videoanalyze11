@@ -23,6 +23,25 @@ describe("v0 analysis runner", () => {
     await runner.run({ userId: "user_1", videoId: "video_1", runId: "run_1", signal: new AbortController().signal });
 
     expect(stageCalls[0]).toBe("probing");
+    expect(state.ensureBilling).toHaveBeenCalledWith("run_1", 20);
+  });
+
+  it.each([
+    [14_401, "video duration"],
+    [90 * 60, "credits exhausted"]
+  ])("stops before FFmpeg and ASR when billing rejects duration %s", async (duration, message) => {
+    const { createV0AnalysisRunner } = await import("./v0-runner.js");
+    const state = createFakeState();
+    state.getRun = vi.fn().mockResolvedValue({ inputVideoPath: "/tmp/video.mp4", audioPath: "/tmp/audio.flac", duration });
+    state.ensureBilling.mockRejectedValue(new Error(message));
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn() };
+    const asr = { transcribeChunk: vi.fn() };
+
+    await expect(createV0AnalysisRunner({ asr, media, state }).run({ userId: "u1", videoId: "v1", runId: "run_1", signal: new AbortController().signal }))
+      .rejects.toThrow(message);
+
+    expect(media.extractAudio).not.toHaveBeenCalled();
+    expect(asr.transcribeChunk).not.toHaveBeenCalled();
   });
 
   it("keeps rendered chunks inside the run directory while resuming", async () => {
@@ -89,6 +108,7 @@ function createFakeState() {
         { index: 1, start: 10, end: 20, status: "pending" as const, transcript: null }
       ];
     },
+    ensureBilling: vi.fn().mockResolvedValue({ billingRuleVersion: "duration-tiered-v2", billedDurationSeconds: 20, billedMinutes: 1, reservedCredits: 1 }),
     async setStage(...args: [string, string, number?]) { void args; return true; },
     async markChunkProcessing() {},
     async saveChunkTranscript(_runId: string, index: number) { state.savedChunkIndexes.push(index); },
