@@ -9,38 +9,51 @@ type StorageDeleter = {
   delete(objectKey: string): Promise<void>;
 };
 
-type CleanupClaim = {
-  objectKey: string;
-};
-
 export type MediaCleanupStatus = "pending" | "cleaning" | "complete" | "retry";
+export type CleanupRunMediaStatus = MediaCleanupStatus | "missing";
+
+type CleanupClaim =
+  | { status: "cleaning"; claimed: true; objectKey: string }
+  | { status: CleanupRunMediaStatus; claimed: false };
 
 export type MediaCleanupRepository = {
-  claimRunMedia(runId: string, now: Date): Promise<CleanupClaim | null>;
+  claimRunMedia(runId: string, now: Date, leaseDurationMs: number): Promise<CleanupClaim>;
   completeRunMediaCleanup(input: { runId: string; objectKey: string; now: Date }): Promise<void>;
   recordCleanupRetry(input: { runId: string; objectKey: string; error: string; now: Date }): Promise<void>;
 };
 
 export function createMediaCleanupRepository(pool: Pool): MediaCleanupRepository {
   return {
-    async claimRunMedia(runId, now) {
+    async claimRunMedia(runId, now, leaseDurationMs) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        const staleBefore = new Date(now.getTime() - leaseDurationMs);
         const claimed = await client.query<{ videoId: string }>(
           `UPDATE analysis_runs
            SET media_cleanup_status = 'cleaning', media_cleanup_attempts = media_cleanup_attempts + 1,
              media_cleanup_error = NULL, updated_at = $2
            WHERE id = $1
              AND status IN ('completed', 'failed', 'cancelled')
-             AND media_cleanup_status IN ('pending', 'failed')
+             AND (
+               media_cleanup_status IN ('pending', 'failed')
+               OR (media_cleanup_status = 'cleaning' AND updated_at <= $3)
+             )
            RETURNING video_id AS "videoId"`,
-          [runId, now]
+          [runId, now, staleBefore]
         );
         const videoId = claimed.rows[0]?.videoId;
         if (!videoId) {
+          const existing = await client.query<{ analysisStatus: string; cleanupStatus: string }>(
+            `SELECT status AS "analysisStatus", media_cleanup_status AS "cleanupStatus"
+             FROM analysis_runs WHERE id = $1`,
+            [runId]
+          );
           await client.query("COMMIT");
-          return null;
+          const state = existing.rows[0];
+          if (!state) return { status: "missing", claimed: false };
+          if (!isTerminalAnalysisStatus(state.analysisStatus)) return { status: "pending", claimed: false };
+          return { status: cleanupStatusFromDatabase(state.cleanupStatus), claimed: false };
         }
         const video = await client.query<{ objectKey: string }>(
           `SELECT object_key AS "objectKey" FROM videos WHERE id = $1`,
@@ -49,7 +62,7 @@ export function createMediaCleanupRepository(pool: Pool): MediaCleanupRepository
         const objectKey = video.rows[0]?.objectKey;
         if (!objectKey) throw new Error("analysis media does not exist");
         await client.query("COMMIT");
-        return { objectKey };
+        return { status: "cleaning", claimed: true, objectKey };
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -62,26 +75,29 @@ export function createMediaCleanupRepository(pool: Pool): MediaCleanupRepository
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await client.query(
-          `UPDATE videos
-           SET original_deleted_at = $2, status = 'missing', updated_at = $2
-           WHERE id = (SELECT video_id FROM analysis_runs WHERE id = $1)`,
-          [input.runId, input.now]
-        );
-        await client.query(
+        const transient = await client.query(
           `UPDATE transient_objects
            SET deleted_at = COALESCE(deleted_at, $3), last_cleanup_error = NULL
            WHERE video_id = (SELECT video_id FROM analysis_runs WHERE id = $1)
              AND object_key = $2 AND kind = 'original'`,
           [input.runId, input.objectKey, input.now]
         );
-        await client.query(
+        requireOneRow(transient.rowCount, "transient objects");
+        const video = await client.query(
+          `UPDATE videos
+           SET original_deleted_at = $2, status = 'missing', updated_at = $2
+           WHERE id = (SELECT video_id FROM analysis_runs WHERE id = $1)`,
+          [input.runId, input.now]
+        );
+        requireOneRow(video.rowCount, "videos");
+        const run = await client.query(
           `UPDATE analysis_runs
            SET media_cleanup_status = 'cleaned', media_cleanup_error = NULL,
              media_cleaned_at = $2, updated_at = $2
-           WHERE id = $1`,
+           WHERE id = $1 AND media_cleanup_status = 'cleaning' AND updated_at = $2`,
           [input.runId, input.now]
         );
+        requireOneRow(run.rowCount, "analysis runs");
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK");
@@ -95,18 +111,23 @@ export function createMediaCleanupRepository(pool: Pool): MediaCleanupRepository
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        const run = await client.query<{ videoId: string }>(
+          `UPDATE analysis_runs
+           SET media_cleanup_status = 'failed', media_cleanup_error = $2, updated_at = $3
+           WHERE id = $1 AND media_cleanup_status = 'cleaning' AND updated_at = $3
+           RETURNING video_id AS "videoId"`,
+          [input.runId, input.error, input.now]
+        );
+        const videoId = run.rows[0]?.videoId;
+        if (!videoId) {
+          await client.query("COMMIT");
+          return;
+        }
         await client.query(
           `UPDATE transient_objects
            SET cleanup_attempts = cleanup_attempts + 1, last_cleanup_error = $3
-           WHERE video_id = (SELECT video_id FROM analysis_runs WHERE id = $1)
-             AND object_key = $2 AND kind = 'original' AND deleted_at IS NULL`,
-          [input.runId, input.objectKey, input.error]
-        );
-        await client.query(
-          `UPDATE analysis_runs
-           SET media_cleanup_status = 'failed', media_cleanup_error = $2, updated_at = $3
-           WHERE id = $1`,
-          [input.runId, input.error, input.now]
+           WHERE video_id = $1 AND object_key = $2 AND kind = 'original' AND deleted_at IS NULL`,
+          [videoId, input.objectKey, input.error]
         );
         await client.query("COMMIT");
       } catch (error) {
@@ -124,16 +145,42 @@ export async function cleanupRunMedia(input: {
   storage: StorageDeleter;
   repository: MediaCleanupRepository;
   now: Date;
-}): Promise<{ status: Extract<MediaCleanupStatus, "complete" | "retry"> }> {
-  const claim = await input.repository.claimRunMedia(input.runId, input.now);
-  if (!claim) return { status: "complete" };
+  leaseDurationMs?: number;
+  removeLocalMedia?: () => Promise<void>;
+}): Promise<{ status: CleanupRunMediaStatus }> {
+  const leaseDurationMs = input.leaseDurationMs ?? 5 * 60 * 1000;
+  if (!Number.isSafeInteger(leaseDurationMs) || leaseDurationMs <= 0) {
+    throw new Error("cleanup lease duration must be a positive integer");
+  }
+  const removeLocalMedia = input.removeLocalMedia ?? (() => removeValidatedRunDirectory(input.runId));
+  let claim: CleanupClaim;
+  try {
+    claim = await input.repository.claimRunMedia(input.runId, input.now, leaseDurationMs);
+  } catch (claimError) {
+    try {
+      await removeLocalMedia();
+    } catch {
+      // The claim failure remains authoritative; without repository access a
+      // local retry cannot be recorded, but cleanup is still attempted.
+    }
+    throw claimError;
+  }
+  if (!claim.claimed) return { status: claim.status };
+
+  let deletionError: unknown;
+  try {
+    await input.storage.delete(claim.objectKey);
+  } catch (error) {
+    if (!isMissingObjectError(error)) deletionError = error;
+  }
+  try {
+    await removeLocalMedia();
+  } catch (error) {
+    deletionError ??= error;
+  }
 
   try {
-    try {
-      await input.storage.delete(claim.objectKey);
-    } catch (error) {
-      if (!isMissingObjectError(error)) throw error;
-    }
+    if (deletionError) throw deletionError;
     await input.repository.completeRunMediaCleanup({ runId: input.runId, objectKey: claim.objectKey, now: input.now });
     return { status: "complete" };
   } catch (error) {
@@ -149,23 +196,23 @@ export async function cleanupRunMedia(input: {
 
 export async function runAnalysisToTerminal(input: {
   runAndPersist(): Promise<void>;
-  markCompleted(): Promise<void>;
-  markFailedOrCancelled(error: unknown): Promise<void>;
+  markCompleted(): Promise<boolean>;
+  markFailedOrCancelled(error: unknown): Promise<boolean>;
   settleSuccess(): Promise<void>;
   settleFailure(error: unknown): Promise<void>;
   cleanupMedia(): Promise<unknown>;
-  removeLocalMedia(): Promise<void>;
   logger?: Pick<Console, "error">;
 }): Promise<void> {
-  let completionCommitted = false;
+  let terminalPersisted = false;
   try {
     await input.runAndPersist();
-    await input.markCompleted();
-    completionCommitted = true;
+    terminalPersisted = await input.markCompleted();
+    if (!terminalPersisted) throw new Error("analysis terminal transition was not persisted");
     await input.settleSuccess();
   } catch (error) {
-    if (completionCommitted) throw error;
-    await input.markFailedOrCancelled(error);
+    if (terminalPersisted) throw error;
+    terminalPersisted = await input.markFailedOrCancelled(error);
+    if (!terminalPersisted) throw error;
     try {
       await input.settleFailure(error);
     } catch (settlementError) {
@@ -173,15 +220,12 @@ export async function runAnalysisToTerminal(input: {
     }
     throw error;
   } finally {
-    try {
-      await input.cleanupMedia();
-    } catch (cleanupError) {
-      (input.logger ?? console).error("media cleanup failed", cleanupError);
-    }
-    try {
-      await input.removeLocalMedia();
-    } catch (localCleanupError) {
-      (input.logger ?? console).error("local media cleanup failed", localCleanupError);
+    if (terminalPersisted) {
+      try {
+        await input.cleanupMedia();
+      } catch (cleanupError) {
+        (input.logger ?? console).error("media cleanup failed", cleanupError);
+      }
     }
   }
 }
@@ -208,4 +252,24 @@ function isMissingObjectError(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "media cleanup failed";
+}
+
+function isTerminalAnalysisStatus(status: string): boolean {
+  return ["completed", "failed", "cancelled"].includes(status);
+}
+
+function cleanupStatusFromDatabase(status: string): MediaCleanupStatus {
+  const mapped: Record<string, MediaCleanupStatus> = {
+    pending: "pending",
+    cleaning: "cleaning",
+    cleaned: "complete",
+    failed: "retry"
+  };
+  const semantic = mapped[status];
+  if (!semantic) throw new Error(`unsupported media cleanup status: ${status}`);
+  return semantic;
+}
+
+function requireOneRow(rowCount: number | null, table: string): void {
+  if (rowCount !== 1) throw new Error(`cleanup metadata update affected ${rowCount ?? 0} ${table}`);
 }

@@ -63,6 +63,99 @@ describe("terminal media cleanup", () => {
     expect(await videoState()).toEqual({ status: "available", originalDeletedAt: null });
     expect(await transientState()).toEqual({ deletedAt: null, cleanupAttempts: 1, lastCleanupError: "temporary S3 failure" });
   });
+
+  it("records retry instead of completion when local media removal fails", async () => {
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(cleanupRunMedia({
+      runId: "run_1",
+      storage,
+      repository: createMediaCleanupRepository(pool),
+      now,
+      removeLocalMedia: vi.fn().mockRejectedValue(new Error("local rm failed"))
+    })).resolves.toEqual({ status: "retry" });
+
+    expect(await runState()).toEqual({ analysisStatus: "completed", cleanupStatus: "failed", attempts: 1, cleanupError: "local rm failed", cleanedAt: null });
+    expect(await videoState()).toEqual({ status: "available", originalDeletedAt: null });
+    expect(await transientState()).toEqual({ deletedAt: null, cleanupAttempts: 1, lastCleanupError: "local rm failed" });
+  });
+
+  it("reclaims a stale cleaning lease using the injected clock and lease duration", async () => {
+    await pool.query(
+      "UPDATE analysis_runs SET media_cleanup_status = 'cleaning', media_cleanup_attempts = 1, updated_at = $2 WHERE id = $1",
+      ["run_1", new Date("2026-08-15T03:55:06.789Z")]
+    );
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(cleanupRunMedia({
+      runId: "run_1",
+      storage,
+      repository: createMediaCleanupRepository(pool),
+      now,
+      leaseDurationMs: 5 * 60 * 1000,
+      removeLocalMedia: vi.fn().mockResolvedValue(undefined)
+    })).resolves.toEqual({ status: "complete" });
+
+    expect(storage.delete).toHaveBeenCalledOnce();
+    expect(await runState()).toMatchObject({ cleanupStatus: "cleaned", attempts: 2 });
+  });
+
+  it("reports a fresh cleaning lease without stealing it or deleting media", async () => {
+    await pool.query(
+      "UPDATE analysis_runs SET media_cleanup_status = 'cleaning', media_cleanup_attempts = 1, updated_at = $2 WHERE id = $1",
+      ["run_1", new Date("2026-08-15T04:04:06.789Z")]
+    );
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(cleanupRunMedia({
+      runId: "run_1",
+      storage,
+      repository: createMediaCleanupRepository(pool),
+      now,
+      leaseDurationMs: 5 * 60 * 1000,
+      removeLocalMedia: vi.fn().mockResolvedValue(undefined)
+    })).resolves.toEqual({ status: "cleaning" });
+
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect(await runState()).toMatchObject({ cleanupStatus: "cleaning", attempts: 1 });
+  });
+
+  it("distinguishes missing, nonterminal pending, and already-complete no-claim states", async () => {
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+    const repository = createMediaCleanupRepository(pool);
+    const removeLocalMedia = vi.fn().mockResolvedValue(undefined);
+
+    await expect(cleanupRunMedia({ runId: "missing_run", storage, repository, now, removeLocalMedia })).resolves.toEqual({ status: "missing" });
+    await pool.query("UPDATE analysis_runs SET status = 'running' WHERE id = 'run_1'");
+    await expect(cleanupRunMedia({ runId: "run_1", storage, repository, now, removeLocalMedia })).resolves.toEqual({ status: "pending" });
+    await pool.query("UPDATE analysis_runs SET status = 'completed', media_cleanup_status = 'cleaned' WHERE id = 'run_1'");
+    await expect(cleanupRunMedia({ runId: "run_1", storage, repository, now, removeLocalMedia })).resolves.toEqual({ status: "complete" });
+
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect(removeLocalMedia).not.toHaveBeenCalled();
+  });
+
+  it("rolls back metadata completion and records retry when a required row is missing", async () => {
+    await pool.query("DELETE FROM transient_objects WHERE id = 'object_1'");
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(cleanupRunMedia({
+      runId: "run_1",
+      storage,
+      repository: createMediaCleanupRepository(pool),
+      now,
+      removeLocalMedia: vi.fn().mockResolvedValue(undefined)
+    })).resolves.toEqual({ status: "retry" });
+
+    expect(await runState()).toEqual({
+      analysisStatus: "completed",
+      cleanupStatus: "failed",
+      attempts: 1,
+      cleanupError: "cleanup metadata update affected 0 transient objects",
+      cleanedAt: null
+    });
+    expect(await videoState()).toEqual({ status: "available", originalDeletedAt: null });
+  });
 });
 
 describe("validated local media cleanup", () => {
@@ -89,8 +182,9 @@ async function seedCompletedRun() {
     [new Date("2026-08-15T00:00:00.000Z")]
   );
   await pool.query(
-    `INSERT INTO analysis_runs (id, video_id, status, media_cleanup_status, media_cleanup_attempts)
-     VALUES ('run_1', 'video_1', 'completed', 'pending', 0)`
+    `INSERT INTO analysis_runs (id, video_id, status, media_cleanup_status, media_cleanup_attempts, updated_at)
+     VALUES ('run_1', 'video_1', 'completed', 'pending', 0, $1)`,
+    [new Date("2026-08-15T00:00:00.000Z")]
   );
   await pool.query(
     `INSERT INTO transient_objects (id, video_id, object_key, kind)

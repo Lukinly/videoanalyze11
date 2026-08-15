@@ -42,12 +42,11 @@ describe("terminal analysis ordering", () => {
 
     await runAnalysisToTerminal({
       runAndPersist: async () => { events.push("persisted"); },
-      markCompleted: async () => { events.push("completed"); },
-      markFailedOrCancelled: async () => { events.push("failed"); },
+      markCompleted: async () => { events.push("completed"); return true; },
+      markFailedOrCancelled: async () => { events.push("failed"); return true; },
       settleSuccess: async () => { events.push("consumed"); },
       settleFailure: async () => { events.push("released"); },
-      cleanupMedia: async () => { events.push("media-cleaned"); },
-      removeLocalMedia: async () => { events.push("local-cleaned"); await removeValidatedRunDirectory(fixture.runId); }
+      cleanupMedia: async () => { events.push("media-cleaned"); events.push("local-cleaned"); await removeValidatedRunDirectory(fixture.runId); }
     });
 
     expect(events).toEqual(["persisted", "completed", "consumed", "media-cleaned", "local-cleaned"]);
@@ -61,12 +60,11 @@ describe("terminal analysis ordering", () => {
 
     await expect(runAnalysisToTerminal({
       runAndPersist: async () => { events.push("processing"); throw failure; },
-      markCompleted: async () => { events.push("completed"); },
-      markFailedOrCancelled: async (error) => { expect(error).toBe(failure); events.push("failed"); },
+      markCompleted: async () => { events.push("completed"); return true; },
+      markFailedOrCancelled: async (error) => { expect(error).toBe(failure); events.push("failed"); return true; },
       settleSuccess: async () => { events.push("consumed"); },
       settleFailure: async (error) => { expect(error).toBe(failure); events.push("released"); },
-      cleanupMedia: async () => { events.push("media-cleaned"); },
-      removeLocalMedia: async () => { events.push("local-cleaned"); await removeValidatedRunDirectory(fixture.runId); }
+      cleanupMedia: async () => { events.push("media-cleaned"); events.push("local-cleaned"); await removeValidatedRunDirectory(fixture.runId); }
     })).rejects.toBe(failure);
 
     expect(events).toEqual(["processing", "failed", "released", "media-cleaned", "local-cleaned"]);
@@ -80,12 +78,11 @@ describe("terminal analysis ordering", () => {
 
     await expect(runAnalysisToTerminal({
       runAndPersist: async () => { throw cancellation; },
-      markCompleted: async () => { events.push("completed"); },
-      markFailedOrCancelled: async (error) => { expect(error).toBe(cancellation); events.push("cancelled"); },
+      markCompleted: async () => { events.push("completed"); return true; },
+      markFailedOrCancelled: async (error) => { expect(error).toBe(cancellation); events.push("cancelled"); return true; },
       settleSuccess: async () => { events.push("consumed"); },
       settleFailure: async (error) => { expect(error).toBe(cancellation); events.push("refunded"); },
-      cleanupMedia: async () => { events.push("media-cleaned"); },
-      removeLocalMedia: async () => { events.push("local-cleaned"); await removeValidatedRunDirectory(fixture.runId); }
+      cleanupMedia: async () => { events.push("media-cleaned"); events.push("local-cleaned"); await removeValidatedRunDirectory(fixture.runId); }
     })).rejects.toBe(cancellation);
 
     expect(events).toEqual(["cancelled", "refunded", "media-cleaned", "local-cleaned"]);
@@ -99,12 +96,11 @@ describe("terminal analysis ordering", () => {
 
     await expect(runAnalysisToTerminal({
       runAndPersist: vi.fn().mockResolvedValue(undefined),
-      markCompleted: vi.fn().mockResolvedValue(undefined),
+      markCompleted: vi.fn().mockResolvedValue(true),
       markFailedOrCancelled: state.setRunFailed,
       settleSuccess: vi.fn().mockResolvedValue(undefined),
       settleFailure: vi.fn().mockResolvedValue(undefined),
-      cleanupMedia: vi.fn().mockRejectedValue(new Error("cleanup repository unavailable")),
-      removeLocalMedia: () => removeValidatedRunDirectory(fixture.runId),
+      cleanupMedia: async () => { await removeValidatedRunDirectory(fixture.runId); throw new Error("cleanup repository unavailable"); },
       logger
     })).resolves.toBeUndefined();
 
@@ -120,16 +116,48 @@ describe("terminal analysis ordering", () => {
 
     await expect(runAnalysisToTerminal({
       runAndPersist: vi.fn().mockResolvedValue(undefined),
-      markCompleted: vi.fn().mockResolvedValue(undefined),
+      markCompleted: vi.fn().mockResolvedValue(true),
       markFailedOrCancelled,
       settleSuccess: vi.fn().mockRejectedValue(chargeFailure),
       settleFailure: vi.fn().mockResolvedValue(undefined),
-      cleanupMedia: vi.fn().mockResolvedValue(undefined),
-      removeLocalMedia: () => removeValidatedRunDirectory(fixture.runId)
+      cleanupMedia: () => removeValidatedRunDirectory(fixture.runId)
     })).rejects.toBe(chargeFailure);
 
     expect(markFailedOrCancelled).not.toHaveBeenCalled();
     await expect(stat(fixture.directory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not settle or delete media when a failure transition affects no terminal row", async () => {
+    const failure = new Error("provider failed");
+    const settleFailure = vi.fn();
+    const cleanupMedia = vi.fn();
+
+    await expect(runAnalysisToTerminal({
+      runAndPersist: async () => { throw failure; },
+      markCompleted: vi.fn().mockResolvedValue(false),
+      markFailedOrCancelled: vi.fn().mockResolvedValue(false),
+      settleSuccess: vi.fn(),
+      settleFailure,
+      cleanupMedia
+    })).rejects.toBe(failure);
+
+    expect(settleFailure).not.toHaveBeenCalled();
+    expect(cleanupMedia).not.toHaveBeenCalled();
+  });
+
+  it("does not delete media when neither completion nor fallback failure is persisted", async () => {
+    const cleanupMedia = vi.fn();
+
+    await expect(runAnalysisToTerminal({
+      runAndPersist: vi.fn().mockResolvedValue(undefined),
+      markCompleted: vi.fn().mockResolvedValue(false),
+      markFailedOrCancelled: vi.fn().mockResolvedValue(false),
+      settleSuccess: vi.fn(),
+      settleFailure: vi.fn(),
+      cleanupMedia
+    })).rejects.toThrow("analysis terminal transition was not persisted");
+
+    expect(cleanupMedia).not.toHaveBeenCalled();
   });
 });
 

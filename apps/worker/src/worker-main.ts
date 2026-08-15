@@ -77,14 +77,15 @@ const consumer = createAnalysisConsumer({
             }
           }
         },
-        markCompleted: () => state.setStage(job.runId, "completed", 1),
+        markCompleted: () => state.markCompleted(job.runId),
         async markFailedOrCancelled(error) {
           const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
-          await pool.query(
+          const result = await pool.query<{ status: string }>(
             `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
-             WHERE id = $1 AND status <> 'completed'`,
+             WHERE id = $1 AND status <> 'completed' RETURNING status`,
             [job.runId, status, error instanceof Error ? error.message : "analysis failed", clock.now()]
           );
+          return result.rowCount === 1 && result.rows[0]?.status === status;
         },
         settleSuccess: () => settleAnalysisSuccess({ runId: job.runId, credits }),
         settleFailure: (error) => settleAnalysisFailure({ runId: job.runId, error, credits }),
@@ -96,9 +97,10 @@ const consumer = createAnalysisConsumer({
             }
           },
           repository: mediaCleanup,
-          now: clock.now()
-        }),
-        removeLocalMedia: () => removeValidatedRunDirectory(job.runId)
+          now: clock.now(),
+          leaseDurationMs: 5 * 60 * 1000,
+          removeLocalMedia: () => removeValidatedRunDirectory(job.runId)
+        })
       });
     }
   }
@@ -125,6 +127,24 @@ function createDatabaseState(input: {
     const context = result.rows[0];
     if (!context) throw new Error("analysis run does not exist");
     return context;
+  }
+
+  async function updateStage(runId: string, stage: string, progress: number): Promise<boolean> {
+    const updatedAt = input.clock.now();
+    if (stage === "completed") {
+      const context = await getResultContext(runId);
+      if (context.mode === "privacy") {
+        await input.results.finalizePrivacyExpiry(runId, privacyResultExpiry(updatedAt));
+      }
+    }
+    const updated = await input.pool.query<{ status: string }>(
+      `UPDATE analysis_runs SET stage = $2, progress = $3,
+         status = CASE WHEN $2 = 'completed' THEN 'completed' WHEN status = 'queued' THEN 'running' ELSE status END,
+         heartbeat_at = $4, updated_at = $4 WHERE id = $1 RETURNING status`,
+      [runId, stage, progress, updatedAt]
+    );
+    if (updated.rowCount !== 1) return false;
+    return stage !== "completed" || updated.rows[0]?.status === "completed";
   }
 
   return {
@@ -164,19 +184,10 @@ function createDatabaseState(input: {
       return this.getChunks(runId);
     },
     async setStage(runId: string, stage: string, progress = 0) {
-      const updatedAt = input.clock.now();
-      if (stage === "completed") {
-        const context = await getResultContext(runId);
-        if (context.mode === "privacy") {
-          await input.results.finalizePrivacyExpiry(runId, privacyResultExpiry(updatedAt));
-        }
-      }
-      await input.pool.query(
-        `UPDATE analysis_runs SET stage = $2, progress = $3,
-           status = CASE WHEN $2 = 'completed' THEN 'completed' WHEN status = 'queued' THEN 'running' ELSE status END,
-           heartbeat_at = $4, updated_at = $4 WHERE id = $1`,
-        [runId, stage, progress, updatedAt]
-      );
+      await updateStage(runId, stage, progress);
+    },
+    async markCompleted(runId: string) {
+      return updateStage(runId, "completed", 1);
     },
     async isCancelling(runId: string) {
       const result = await input.pool.query<{ status: string }>("SELECT status FROM analysis_runs WHERE id = $1", [runId]);
