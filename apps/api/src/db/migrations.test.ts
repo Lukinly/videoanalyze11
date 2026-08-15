@@ -27,4 +27,16 @@ describe("database migrations", () => {
     expect(sql).toContain("failure_kind");
     expect(sql).toContain("stale_timeout");
   });
+
+  it("adds immutable duration billing snapshots and isolated AI note bodies", async () => {
+    const sql = await readFile(join(migrations, "0008_duration_billing_ai_notes.sql"), "utf8");
+
+    expect(sql).toContain("billing_rule_version");
+    expect(sql).toContain("billed_duration_seconds");
+    expect(sql).toContain("billed_minutes");
+    expect(sql).toContain("reserved_credits");
+    expect(sql).toContain("CREATE TRIGGER analysis_runs_billing_snapshot_immutable");
+    expect(sql).toContain("CREATE TABLE ai_notes");
+    expect(sql).toContain("CREATE TABLE ephemeral_ai_notes");
+  });
 });

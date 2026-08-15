@@ -1,5 +1,6 @@
 export * from "./analysis.js";
 export * from "./auth.js";
+export * from "./billing.js";
 export * from "./errors.js";
 export * from "./media.js";
 export * from "./provider.js";

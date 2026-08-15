@@ -38,6 +38,10 @@ export const analysisRuns = pgTable("analysis_runs", {
   heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
   error: text("error"),
   failureKind: text("failure_kind"),
+  billingRuleVersion: text("billing_rule_version"),
+  billedDurationSeconds: real("billed_duration_seconds"),
+  billedMinutes: integer("billed_minutes"),
+  reservedCredits: integer("reserved_credits"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   displayName: text("display_name").notNull().default(""),
@@ -109,6 +113,21 @@ export const ephemeralChapters = pgTable("ephemeral_chapters", {
   expiresAtIndex: index("ephemeral_chapters_expires_at_idx").on(table.expiresAt),
   runTimeIndex: index("ephemeral_chapters_run_time_idx").on(table.runId, table.startSeconds)
 }));
+
+export const aiNotes = pgTable("ai_notes", {
+  runId: text("run_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  notesJson: jsonb("notes_json").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull()
+});
+
+export const ephemeralAiNotes = pgTable("ephemeral_ai_notes", {
+  runId: text("run_id").primaryKey(),
+  userId: text("user_id").notNull(),
+  notesJson: jsonb("notes_json").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull()
+}, (table) => ({ expiresAtIndex: index("ephemeral_ai_notes_expires_at_idx").on(table.expiresAt) }));
 
 export const chunks = pgTable("chunks", {
   id: text("id").primaryKey(),
