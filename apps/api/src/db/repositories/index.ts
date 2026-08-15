@@ -9,7 +9,7 @@ import { createCreditRepository } from "./credits.js";
 import { createAdminRepository } from "./admin.js";
 import { createTransientMediaRepository } from "../../retention/transient-media-repository.js";
 
-export function createRepositories(pool: Pool) {
+export function createRepositories(pool: Pool, options: { transientCapacityBytes?: number } = {}) {
   return {
     users: createUserRepository(pool),
     videos: createVideoRepository(pool),
@@ -19,6 +19,6 @@ export function createRepositories(pool: Pool) {
     auth: createAuthRepository(pool),
     runs: createAnalysisRunRepository(pool),
     search: createSearchRepository(pool),
-    transientMedia: createTransientMediaRepository(pool)
+    transientMedia: createTransientMediaRepository(pool, { capacityBytes: options.transientCapacityBytes })
   };
 }

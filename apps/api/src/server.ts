@@ -14,7 +14,7 @@ import { DomainError } from "@videoanalyze/domain";
 
 const env = parseEnv();
 const { pool } = createDatabase(env.databaseUrl);
-const repositories = createRepositories(pool);
+const repositories = createRepositories(pool, { transientCapacityBytes: env.transientCapacityBytes });
 const s3 = createS3Client({ endpoint: env.s3Endpoint, region: env.s3Region, accessKey: env.s3AccessKey, secretKey: env.s3SecretKey });
 const s3Presign = createS3Client({ endpoint: env.s3PublicEndpoint, region: env.s3Region, accessKey: env.s3AccessKey, secretKey: env.s3SecretKey });
 const storage = createS3ObjectStorage({ client: s3 as never, presignClient: s3Presign as never, bucket: env.s3Bucket });
