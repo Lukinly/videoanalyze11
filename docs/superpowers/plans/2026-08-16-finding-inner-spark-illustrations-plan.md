@@ -81,3 +81,29 @@
 - [ ] **Step 2: 核对文件与尺寸**
 
   使用 `file assets/social/finding-inner-spark-*-v2.png` 核对两张文件均为有效竖版 PNG，并报告最终路径。
+
+### Task 4: 丰富横版电影感画面
+
+**Files:**
+- Read: `assets/social/finding-inner-spark-cinematic-landscape.png`
+- Create: `assets/social/finding-inner-spark-cinematic-landscape-v2.png`
+
+**Interfaces:**
+- Consumes: 已生成的横版电影感 PNG 与设计文档中的“横版电影感版本：丰富画面”约束。
+- Produces: 一张叙事更丰富但仍平和舒展的横版 PNG。
+
+- [ ] **Step 1: 检查原始横版图**
+
+  核对人物、道路、远方火光、晨雾山谷、上方留白与横版比例，确定它们均为编辑不变量。
+
+- [ ] **Step 2: 使用结构化提示词定向编辑**
+
+  仅增加少量沿道路漂浮的橙金微光颗粒、天空下缘两至三层极淡远山与柔和晨光层次；保留纤细无兵刃游侠、原有构图、色彩与平和情绪，不加入建筑、飞鸟、额外人物、武器或明显奇幻生物。
+
+- [ ] **Step 3: 检查画面密度和叙事焦点**
+
+  验证画面不再空旷，微光没有变成灯饰或大面积光点，人物与远方小火光仍是主叙事，顶部约三分之一仍可放置文章标题。
+
+- [ ] **Step 4: 保存并验证文件**
+
+  将合格输出复制到 `assets/social/finding-inner-spark-cinematic-landscape-v2.png`；若该文件已存在则使用下一个版本号。运行 `file assets/social/finding-inner-spark-cinematic-landscape-v2.png`，确认它是有效横版 PNG。
