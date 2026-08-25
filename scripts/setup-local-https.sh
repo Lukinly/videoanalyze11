@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 PROJECT_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
 COMPOSE_FILE=${COMPOSE_FILE:-$PROJECT_ROOT/infra/docker-compose.yml}
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-$PROJECT_ROOT/.env}
 CERT_FILE=${LOCAL_HTTPS_CERT_FILE:-$PROJECT_ROOT/.local/videoanalyze-local-root.crt}
 WSL_CA_FILE=/usr/local/share/ca-certificates/videoanalyze-local.crt
 
@@ -31,7 +32,13 @@ if ! command -v sudo >/dev/null 2>&1 || ! command -v docker >/dev/null 2>&1; the
   exit 1
 fi
 
-compose=(sudo docker compose -f "$COMPOSE_FILE")
+if [[ ! -f "$COMPOSE_ENV_FILE" ]]; then
+  echo "Compose environment file is missing: $COMPOSE_ENV_FILE" >&2
+  echo "Copy .env.example to .env and configure it first." >&2
+  exit 1
+fi
+
+compose=(sudo docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE")
 mkdir -p "$(dirname -- "$CERT_FILE")"
 
 echo "Starting local HTTPS services without deleting data volumes..."

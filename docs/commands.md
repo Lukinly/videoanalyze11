@@ -73,7 +73,7 @@ DATABASE_URL=postgres://videoanalyze:videoanalyze@localhost:5433/videoanalyze \
 corepack pnpm admin:create --email admin@example.com
 
 # 或在运行中的容器里创建
-sudo docker compose -f infra/docker-compose.yml run --rm api \
+sudo docker compose --env-file .env -f infra/docker-compose.yml run --rm api \
   node dist/cli/admin-create.js --email admin@example.com
 ```
 
@@ -84,22 +84,22 @@ sudo docker compose -f infra/docker-compose.yml run --rm api \
 
 ```bash
 # 启动完整栈（postgres / redis / minio / mailpit / api / worker / web / caddy / migrate）
-sudo docker compose -f infra/docker-compose.yml up -d --build
+sudo docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 
 # 查看服务状态
-sudo docker compose -f infra/docker-compose.yml ps
+sudo docker compose --env-file .env -f infra/docker-compose.yml ps
 
 # 跟踪日志
-sudo docker compose -f infra/docker-compose.yml logs -f migrate api worker
+sudo docker compose --env-file .env -f infra/docker-compose.yml logs -f migrate api worker
 
 # 重建并强制重启指定服务
-sudo docker compose -f infra/docker-compose.yml up -d --build --force-recreate api minio proxy
+sudo docker compose --env-file .env -f infra/docker-compose.yml up -d --build --force-recreate api minio proxy
 
 # 停止（保留数据卷）
-sudo docker compose -f infra/docker-compose.yml down
+sudo docker compose --env-file .env -f infra/docker-compose.yml down
 
 # 停止并删除数据卷（会清空用户/视频/账单等数据，慎用！）
-sudo docker compose -f infra/docker-compose.yml down -v
+sudo docker compose --env-file .env -f infra/docker-compose.yml down -v
 ```
 
 本地 CA 由 Caddy 持久化在 `caddy-data` 卷中，`down -v` 会破坏本地 HTTPS 信任链。
