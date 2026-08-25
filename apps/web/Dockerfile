@@ -7,6 +7,7 @@ COPY packages/domain/package.json packages/domain/package.json
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY apps/web apps/web
 COPY packages/domain packages/domain
+RUN rm -f packages/domain/tsconfig.tsbuildinfo
 RUN pnpm --filter @videoanalyze/domain build
 RUN pnpm --filter @videoanalyze/web build
 
