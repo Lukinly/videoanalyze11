@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type AnalysisRun, type CreditBalance, type PublicUser } from "./api/client";
+import { api, type AnalysisRun, type CreditBalance, type LinkPreview, type PublicUser } from "./api/client";
 import { LoginPage } from "./auth/LoginPage";
 import { RegisterPage } from "./auth/RegisterPage";
 import { VerifyEmailPage } from "./auth/VerifyEmailPage";
@@ -12,6 +12,7 @@ import { WatchingWorkspace } from "./viewing/WatchingWorkspace";
 import { AccountPage } from "./account/AccountPage";
 import { AnalysisHistory } from "./library/AnalysisHistory";
 import { NotesPage } from "./notes/NotesPage";
+import { LinkVideo } from "./library/LinkVideo";
 
 export function App() {
   const [user, setUser] = useState<PublicUser | null>(null);
@@ -57,7 +58,7 @@ export function App() {
           let playbackUrl = "";
           try { playbackUrl = (await api.getPlaybackUrl(restored.videoId)).url; } catch { /* terminal media is intentionally absent */ }
           setRun(restored);
-          setVideo({ videoId: restored.videoId, fileName: restored.fileName ?? "已删除的视频", playbackUrl, fileSize: 0, estimatedCost: 0, retentionMode: restored.retentionMode ?? "standard" });
+          setVideo({ videoId: restored.videoId, fileName: restored.fileName ?? "已删除的视频", playbackUrl, fileSize: 0, estimatedCost: 0, retentionMode: restored.retentionMode ?? "standard", sourcePlatform: restored.sourcePlatform, sourceUrl: restored.sourceUrl, sourceAuthor: restored.sourceAuthor, thumbnailUrl: restored.thumbnailUrl });
         }
       }
       setCheckingAuth(false);
@@ -79,20 +80,29 @@ export function App() {
     const started = await api.startAnalysis(uploaded.videoId, uploaded.retentionMode);
     setRun(started);
   }
+  async function handleLinked(preview: LinkPreview & { videoId: string }) {
+    const linked: UploadedVideo = { videoId: preview.videoId, fileName: preview.title, playbackUrl: "", fileSize: 0, estimatedCost: preview.estimatedCost, retentionMode: "standard", sourcePlatform: preview.platform, sourceUrl: preview.canonicalUrl, sourceAuthor: preview.author, thumbnailUrl: preview.thumbnailUrl };
+    const started = await api.startAnalysis(preview.videoId, "standard");
+    setVideo(linked);
+    setRun({ ...started, sourcePlatform: preview.platform, sourceUrl: preview.canonicalUrl, sourceAuthor: preview.author, thumbnailUrl: preview.thumbnailUrl, fileName: preview.title, duration: preview.duration });
+    void api.getCredits().then(setCredits);
+    void api.listAnalyses().then((result) => setHistory(result.items));
+  }
 
   const completed = (completedRun: AnalysisRun) => { setRun(completedRun); void api.getCredits().then(setCredits); };
 
   return video
     ? <WatchingWorkspace user={user} credits={credits} video={video} run={run} playerRef={playerRef} onLogout={logout} onCompleted={completed} onAttach={(url, fileName) => setVideo((current) => current ? { ...current, playbackUrl: url, fileName } : current)} onDeleted={() => { setVideo(null); setRun(null); window.history.replaceState({}, "", "/"); void api.listAnalyses().then((result) => setHistory(result.items)); }} />
-    : <HomePage user={user} credits={credits} history={history} onLogout={logout} onUploaded={(uploaded) => { void handleUploaded(uploaded); }} />;
+    : <HomePage user={user} credits={credits} history={history} onLogout={logout} onUploaded={(uploaded) => { void handleUploaded(uploaded); }} onLinked={handleLinked} />;
 }
 
-function HomePage({ user, credits, history, onLogout, onUploaded }: { user: PublicUser; credits: CreditBalance | null; history: AnalysisRun[]; onLogout: () => void; onUploaded: (video: UploadedVideo) => void }) {
+function HomePage({ user, credits, history, onLogout, onUploaded, onLinked }: { user: PublicUser; credits: CreditBalance | null; history: AnalysisRun[]; onLogout: () => void; onUploaded: (video: UploadedVideo) => void; onLinked: (preview: LinkPreview & { videoId: string }) => Promise<void> }) {
+  const [sourceMode, setSourceMode] = useState<"upload" | "link">("upload");
   return <main className="app-shell home-shell">
     <header className="topbar"><Brand /><div className="user-menu"><span className="credit-badge">{credits ? `${credits.available} 积分可用` : "积分加载中"}</span>{user.role === "admin" && <a className="text-button" href="/admin">后台</a>}<span>{user.email}</span><a className="account-link" href="/account">个人中心</a><button className="text-button" type="button" onClick={onLogout}>退出</button></div></header>
     <div className="home-content">
       <div className="hero-copy"><p className="eyebrow">Your private video desk</p><h1>把每段视频，变成<br /><em>可搜索的知识。</em></h1><p>上传、转写、定位。AI 在后台处理，你在前台掌控每一个时间点。</p></div>
-      <UploadVideo availableCredits={credits?.available} onUploaded={onUploaded} />
+      <div className="source-picker"><div className="source-picker-tabs" aria-label="视频传入方式"><button className={sourceMode === "upload" ? "is-active" : ""} type="button" aria-pressed={sourceMode === "upload"} onClick={() => setSourceMode("upload")}>上传视频解析</button><button className={sourceMode === "link" ? "is-active" : ""} type="button" aria-pressed={sourceMode === "link"} onClick={() => setSourceMode("link")}>输入链接解析</button></div>{sourceMode === "upload" ? <UploadVideo availableCredits={credits?.available} onUploaded={onUploaded} /> : <LinkVideo availableCredits={credits?.available} previewLink={api.previewLink} confirmLink={api.confirmLink} onConfirmed={onLinked} />}</div>
       <AnalysisHistory items={history} />
     </div>
   </main>;

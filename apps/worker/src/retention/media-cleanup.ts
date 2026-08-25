@@ -13,12 +13,12 @@ export type MediaCleanupStatus = "pending" | "cleaning" | "complete" | "retry";
 export type CleanupRunMediaStatus = MediaCleanupStatus | "missing";
 
 type CleanupClaim =
-  | { status: "cleaning"; claimed: true; objectKey: string }
+  | { status: "cleaning"; claimed: true; objectKey: string; remote: boolean }
   | { status: CleanupRunMediaStatus; claimed: false };
 
 export type MediaCleanupRepository = {
   claimRunMedia(runId: string, now: Date, leaseDurationMs: number): Promise<CleanupClaim>;
-  completeRunMediaCleanup(input: { runId: string; objectKey: string; now: Date }): Promise<void>;
+  completeRunMediaCleanup(input: { runId: string; objectKey: string; remote: boolean; now: Date }): Promise<void>;
   recordCleanupRetry(input: { runId: string; objectKey: string; error: string; now: Date }): Promise<void>;
 };
 
@@ -55,14 +55,14 @@ export function createMediaCleanupRepository(pool: Pool): MediaCleanupRepository
           if (!isTerminalAnalysisStatus(state.analysisStatus)) return { status: "pending", claimed: false };
           return { status: cleanupStatusFromDatabase(state.cleanupStatus), claimed: false };
         }
-        const video = await client.query<{ objectKey: string }>(
-          `SELECT object_key AS "objectKey" FROM videos WHERE id = $1`,
+        const video = await client.query<{ objectKey: string; sourcePlatform: string }>(
+          `SELECT object_key AS "objectKey", source_platform AS "sourcePlatform" FROM videos WHERE id = $1`,
           [videoId]
         );
         const objectKey = video.rows[0]?.objectKey;
         if (!objectKey) throw new Error("analysis media does not exist");
         await client.query("COMMIT");
-        return { status: "cleaning", claimed: true, objectKey };
+        return { status: "cleaning", claimed: true, objectKey, remote: video.rows[0]?.sourcePlatform !== "upload" };
       } catch (error) {
         await client.query("ROLLBACK");
         throw error;
@@ -75,21 +75,23 @@ export function createMediaCleanupRepository(pool: Pool): MediaCleanupRepository
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const transient = await client.query(
-          `UPDATE transient_objects
-           SET deleted_at = COALESCE(deleted_at, $3), last_cleanup_error = NULL
-           WHERE video_id = (SELECT video_id FROM analysis_runs WHERE id = $1)
-             AND object_key = $2 AND kind = 'original'`,
-          [input.runId, input.objectKey, input.now]
-        );
-        requireOneRow(transient.rowCount, "transient objects");
-        const video = await client.query(
-          `UPDATE videos
-           SET original_deleted_at = $2, status = 'missing', updated_at = $2
-           WHERE id = (SELECT video_id FROM analysis_runs WHERE id = $1)`,
-          [input.runId, input.now]
-        );
-        requireOneRow(video.rowCount, "videos");
+        if (!input.remote) {
+          const transient = await client.query(
+            `UPDATE transient_objects
+             SET deleted_at = COALESCE(deleted_at, $3), last_cleanup_error = NULL
+             WHERE video_id = (SELECT video_id FROM analysis_runs WHERE id = $1)
+               AND object_key = $2 AND kind = 'original'`,
+            [input.runId, input.objectKey, input.now]
+          );
+          requireOneRow(transient.rowCount, "transient objects");
+          const video = await client.query(
+            `UPDATE videos
+             SET original_deleted_at = $2, status = 'missing', updated_at = $2
+             WHERE id = (SELECT video_id FROM analysis_runs WHERE id = $1)`,
+            [input.runId, input.now]
+          );
+          requireOneRow(video.rowCount, "videos");
+        }
         const run = await client.query(
           `UPDATE analysis_runs
            SET media_cleanup_status = 'cleaned', media_cleanup_error = NULL,
@@ -169,7 +171,7 @@ export async function cleanupRunMedia(input: {
 
   let deletionError: unknown;
   try {
-    await input.storage.delete(claim.objectKey);
+    if (!claim.remote) await input.storage.delete(claim.objectKey);
   } catch (error) {
     if (!isMissingObjectError(error)) deletionError = error;
   }
@@ -181,7 +183,7 @@ export async function cleanupRunMedia(input: {
 
   try {
     if (deletionError) throw deletionError;
-    await input.repository.completeRunMediaCleanup({ runId: input.runId, objectKey: claim.objectKey, now: input.now });
+    await input.repository.completeRunMediaCleanup({ runId: input.runId, objectKey: claim.objectKey, remote: claim.remote, now: input.now });
     return { status: "complete" };
   } catch (error) {
     await input.repository.recordCleanupRetry({

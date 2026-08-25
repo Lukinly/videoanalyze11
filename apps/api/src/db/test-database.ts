@@ -28,7 +28,9 @@ const migrationStatements = [
     fingerprint TEXT, duration REAL, status TEXT NOT NULL DEFAULT 'available',
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
     original_expires_at TIMESTAMPTZ, result_expires_at TIMESTAMPTZ,
-    original_deleted_at TIMESTAMPTZ
+    original_deleted_at TIMESTAMPTZ,
+    source_platform TEXT NOT NULL DEFAULT 'upload', source_url TEXT, external_video_id TEXT,
+    source_part INTEGER, source_author TEXT, thumbnail_url TEXT, subtitle_language TEXT, subtitle_kind TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS analysis_runs (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

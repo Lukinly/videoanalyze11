@@ -12,6 +12,8 @@ import { createS3ObjectStorage } from "./storage/s3-storage.js";
 import { createUploadService } from "./storage/upload-service.js";
 import { createResultService } from "./results/result-service.js";
 import { createMediaService } from "./routes/media.js";
+import { createLinkImportService } from "./links/link-import-service.js";
+import { createPlatformInspector } from "./links/platform-inspector.js";
 
 const env = parseEnv();
 const { pool } = createDatabase(env.databaseUrl);
@@ -73,6 +75,7 @@ const app = buildApp({
   uploadService: createUploadService({ transientMedia: repositories.transientMedia, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds, transientCapacityBytes: env.transientCapacityBytes }),
   analysisService: createAnalysisService({ videos: repositories.videos, runs: repositories.runs, queue, admissionLimits: { maxQueuedPerUser: env.maxQueuedRunsPerUser, maxTotalQueued: env.maxTotalQueuedRuns, maxEstimatedWaitSeconds: env.maxQueueWaitSeconds } }),
   resultService,
+  linkImportService: createLinkImportService({ inspector: createPlatformInspector(), repository: repositories.videos }),
   credits: repositories.credits,
   topups: repositories.admin,
   users: repositories.users,

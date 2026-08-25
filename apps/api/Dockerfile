@@ -30,11 +30,13 @@ RUN sed -i \
       -e "s|http://deb.debian.org/debian|http://${APT_MIRROR}/debian|g" \
       /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip ffmpeg \
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp==2026.7.4 bilibili-cli==0.6.2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/deploy ./
 COPY --from=build /workspace/apps/api/dist ./dist
 COPY --from=build /workspace/apps/api/src/db/migrations ./dist/db/migrations
 COPY --from=build /workspace/apps/api/package.json ./package.json
+USER node
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

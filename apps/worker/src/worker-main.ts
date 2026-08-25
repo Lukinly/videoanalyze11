@@ -13,7 +13,7 @@ import { createGroqAsrProvider } from "./providers/groq-asr.js";
 import { createAnthropicSummaryProvider } from "./providers/anthropic-summary.js";
 import { createV1SummaryRunner } from "./summary/v1-runner.js";
 import { createNotesRunner } from "./notes/notes-runner.js";
-import type { RetentionMode, TranscriptSegment } from "@videoanalyze/domain";
+import { MAX_VIDEO_DURATION_SECONDS, type RetentionMode, type TranscriptSegment } from "@videoanalyze/domain";
 import { createWorkerCreditRepository } from "./credits/credit-repository.js";
 import { AnalysisCancelledError } from "./analysis/cancellation.js";
 import { settleAnalysisFailure, settleAnalysisSuccess } from "./analysis/settlement.js";
@@ -30,6 +30,7 @@ import { createRetentionRepository } from "./retention/retention-repository.js";
 import { startRetentionScheduler } from "./retention/retention-scheduler.js";
 import { FifoSemaphore, KeyedFifoSemaphore } from "./concurrency/semaphore.js";
 import { requireStageUpdate } from "./analysis/stage-fence.js";
+import { createPlatformSourceLoader, materializeImportedSegments, type RemoteVideoSource } from "./links/platform-source.js";
 
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
@@ -76,6 +77,7 @@ const credits = createWorkerCreditRepository(pool);
 const results = createResultStore(pool);
 const mediaCleanup = createMediaCleanupRepository(pool);
 const retention = createRetentionRepository(pool);
+const platformSources = createPlatformSourceLoader();
 const clock = { now: () => new Date() };
 const storageDeleter = {
   async delete(objectKey: string) {
@@ -104,14 +106,30 @@ const consumer = createAnalysisConsumer({
           async runAndPersist() {
             if (job.signal.aborted || await state.isCancelling(job.runId)) throw new AnalysisCancelledError("before_processing");
             await requireStageUpdate(() => state.setStage(job.runId, "probing", 0.01));
-            const probed = await state.getRun(job.runId);
+            const source = await state.getSourceInfo(job.runId);
+            let transcriptImported = false;
+            if (source.remote) {
+              await state.ensureBilling(job.runId, source.duration);
+              const imported = await platformSources.tryTranscript(source.remote, directory, job.signal);
+              if (imported?.length) {
+                await requireStageUpdate(() => state.setStage(job.runId, "transcribing", 0.5));
+                await state.saveTranscript(job.runId, materializeImportedSegments(job.runId, imported), []);
+                await requireStageUpdate(() => state.setStage(job.runId, "merging_transcript", 0.95));
+                transcriptImported = true;
+              } else {
+                const audioPath = await platformSources.downloadAudio(source.remote, directory, job.signal);
+                const downloaded = await media.probe(audioPath);
+                if (downloaded.duration > MAX_VIDEO_DURATION_SECONDS) throw new Error("downloaded audio exceeds the four-hour limit");
+                state.setRemoteInput(audioPath, downloaded.duration);
+              }
+            }
             const process = async () => {
-              await createV0AnalysisRunner({ asr, media, state }).run(job);
+              if (!transcriptImported) await createV0AnalysisRunner({ asr, media, state }).run(job);
               if (!summaryProvider) throw new Error("summary and AI notes provider is required");
               await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
               await createNotesRunner({ notes: summaryProvider, state }).run({ runId: job.runId });
             };
-            if (probed.duration > env.longVideoThresholdSeconds) await longVideoSemaphore.run(process);
+            if (source.duration > env.longVideoThresholdSeconds) await longVideoSemaphore.run(process);
             else await process();
           },
           markCompleted: () => state.markCompleted(job.runId),
@@ -192,6 +210,20 @@ function createDatabaseState(input: {
   }
 
   return {
+    async getSourceInfo(runId: string): Promise<{ duration: number; remote: RemoteVideoSource | null }> {
+      const result = await input.pool.query<{ duration: number | null; platform: string; url: string | null; subtitleLanguage: string | null }>(
+        `SELECT v.duration, v.source_platform AS platform, v.source_url AS url, v.subtitle_language AS "subtitleLanguage"
+         FROM analysis_runs ar JOIN videos v ON v.id = ar.video_id WHERE ar.id = $1`, [runId]);
+      const row = result.rows[0];
+      if (!row || !row.duration) throw new Error("analysis source duration is unavailable");
+      const remote = row.platform === "youtube" || row.platform === "bilibili"
+        ? { platform: row.platform, url: row.url ?? "", subtitleLanguage: row.subtitleLanguage } as RemoteVideoSource : null;
+      if (remote && !remote.url) throw new Error("analysis source URL is unavailable");
+      return { duration: row.duration, remote };
+    },
+    setRemoteInput(inputPath: string, duration: number) {
+      cachedRun = { inputVideoPath: inputPath, audioPath: `${input.directory}/audio.flac`, duration };
+    },
     async ensureBilling(runId: string, durationSeconds: number) {
       const context = await getResultContext(runId);
       const snapshot = await input.credits.reserveForDuration({ runId, userId: context.userId, durationSeconds });
@@ -200,13 +232,14 @@ function createDatabaseState(input: {
     },
     async getRun(runId: string) {
       if (cachedRun) return cachedRun;
-      const result = await input.pool.query<{ userId: string; objectKey: string; duration: number | null }>(
-        `SELECT ar.user_id AS "userId", v.object_key AS "objectKey", v.duration
+      const result = await input.pool.query<{ userId: string; objectKey: string; duration: number | null; platform: string }>(
+        `SELECT ar.user_id AS "userId", v.object_key AS "objectKey", v.duration, v.source_platform AS platform
          FROM analysis_runs ar JOIN videos v ON v.id = ar.video_id
          WHERE ar.id = $1`, [runId]
       );
       const row = result.rows[0];
       if (!row) throw new Error("analysis run does not exist");
+      if (row.platform !== "upload") throw new Error("remote source was not prepared");
       await mkdir(input.directory, { recursive: true });
       const inputVideoPath = `${input.directory}/original`;
       try { await stat(inputVideoPath); } catch { await downloadObject(input.s3, input.bucket, row.objectKey, inputVideoPath); }

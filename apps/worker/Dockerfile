@@ -30,12 +30,15 @@ RUN sed -i \
       -e "s|http://deb.debian.org/debian|http://${APT_MIRROR}/debian|g" \
       /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl python3 python3-pip \
+    && pip3 install --no-cache-dir --break-system-packages yt-dlp==2026.7.4 bilibili-cli==0.6.2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /workspace/deploy ./
 COPY --from=build /workspace/apps/worker/dist ./dist
 COPY --from=build /workspace/apps/worker/package.json ./package.json
+COPY apps/worker/scripts/bilibili-part.py /app/bilibili-part.py
 COPY apps/worker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+USER node
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/worker-main.js"]

@@ -3,6 +3,7 @@ import { newDb } from "pg-mem";
 import type { Pool as PgPool } from "pg";
 import type { TranscriptSegment } from "@videoanalyze/domain";
 import type { AlignedSummaryResult } from "../summary/v1-runner.js";
+import { materializeImportedSegments } from "../links/platform-source.js";
 
 const memoryDb = newDb({ autoCreateForeignKeyIndices: true });
 const { Pool } = memoryDb.adapters.createPg();
@@ -56,6 +57,16 @@ describe("result store", () => {
       { id: "standard_run_seg_1", runId: "standard_run", start: 0, end: 4, text: "first" },
       { id: "standard_run_seg_2", runId: "standard_run", start: 4, end: 9, text: "second" }
     ]);
+  });
+
+  it("persists subtitle-first imported cues through the transcript schema", async () => {
+    const { createResultStore } = await import("./result-store.js");
+    await createRun("subtitle_run", "standard");
+    const imported = materializeImportedSegments("subtitle_run", [{ start: 2, end: 5, text: "平台字幕" }]);
+
+    await createResultStore(pool).saveTranscript({ runId: "subtitle_run", userId: "user_1", mode: "standard", expiresAt: null, segments: imported });
+
+    expect((await createResultStore(pool).getTranscript("subtitle_run")).segments).toEqual(imported);
   });
 
   it("keeps privacy summaries and chapter bodies out of ordinary tables", async () => {

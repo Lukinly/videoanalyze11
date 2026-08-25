@@ -25,7 +25,15 @@ export const videos = pgTable("videos", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   originalExpiresAt: timestamp("original_expires_at", { withTimezone: true }),
   resultExpiresAt: timestamp("result_expires_at", { withTimezone: true }),
-  originalDeletedAt: timestamp("original_deleted_at", { withTimezone: true })
+  originalDeletedAt: timestamp("original_deleted_at", { withTimezone: true }),
+  sourcePlatform: text("source_platform").notNull().default("upload"),
+  sourceUrl: text("source_url"),
+  externalVideoId: text("external_video_id"),
+  sourcePart: integer("source_part"),
+  sourceAuthor: text("source_author"),
+  thumbnailUrl: text("thumbnail_url"),
+  subtitleLanguage: text("subtitle_language"),
+  subtitleKind: text("subtitle_kind")
 });
 
 export const analysisRuns = pgTable("analysis_runs", {

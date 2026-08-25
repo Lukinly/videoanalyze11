@@ -35,6 +35,15 @@ export type AnalysisRunRecord = {
 
 export function createAnalysisRunRepository(pool: Pool) {
   return {
+    async findActiveOwnedByVideo(userId: string, videoId: string) {
+      const result = await pool.query<{ id: string; status: string }>(
+        `SELECT id, status FROM analysis_runs
+         WHERE user_id = $1 AND video_id = $2 AND status IN ('queued', 'running', 'cancelling')
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId, videoId]
+      );
+      return result.rows[0] ?? null;
+    },
     async getAdmissionSnapshot(userId: string) {
       const result = await pool.query<{ userRunning: number; userQueued: number; totalQueued: number; estimatedWaitSeconds: number }>(
         `SELECT
@@ -51,14 +60,38 @@ export function createAnalysisRunRepository(pool: Pool) {
     },
     async create(input: { id: string; userId: string; videoId: string; displayName?: string; retentionMode?: RetentionMode }): Promise<AnalysisRunRecord> {
       const now = new Date();
-      const result = await pool.query<AnalysisRunRecord>(
-        `INSERT INTO analysis_runs (id, user_id, video_id, display_name, retention_mode, stage, status, progress, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'queued', 'queued', 0, $6, $6)
-         RETURNING id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
-           retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", results_deleted_at AS "resultsDeletedAt", stage, status, progress, error`,
-        [input.id, input.userId, input.videoId, input.displayName ?? "", input.retentionMode ?? "standard", now]
-      );
-      return { ...result.rows[0], completedChunks: 0, totalChunks: 0 };
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const owner = await client.query("SELECT id FROM videos WHERE id = $1 AND user_id = $2 FOR UPDATE", [input.videoId, input.userId]);
+        if (owner.rowCount !== 1) throw new Error("analysis video does not exist");
+        const active = await client.query<AnalysisRunRecord>(
+          `SELECT id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
+             retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", results_deleted_at AS "resultsDeletedAt",
+             stage, status, progress, error
+           FROM analysis_runs WHERE user_id = $1 AND video_id = $2 AND status IN ('queued', 'running', 'cancelling')
+           ORDER BY created_at DESC LIMIT 1`,
+          [input.userId, input.videoId]
+        );
+        if (active.rows[0]) {
+          await client.query("COMMIT");
+          return { ...active.rows[0], completedChunks: 0, totalChunks: 0 };
+        }
+        const result = await client.query<AnalysisRunRecord>(
+          `INSERT INTO analysis_runs (id, user_id, video_id, display_name, retention_mode, stage, status, progress, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'queued', 'queued', 0, $6, $6)
+           RETURNING id, user_id AS "userId", video_id AS "videoId", display_name AS "displayName",
+             retention_mode AS "retentionMode", result_expires_at AS "resultExpiresAt", results_deleted_at AS "resultsDeletedAt", stage, status, progress, error`,
+          [input.id, input.userId, input.videoId, input.displayName ?? "", input.retentionMode ?? "standard", now]
+        );
+        await client.query("COMMIT");
+        return { ...result.rows[0], completedChunks: 0, totalChunks: 0 };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     },
     async findOwnedById(userId: string, runId: string): Promise<AnalysisRunRecord | null> {
       const result = await pool.query<AnalysisRunRecord & { summaryJson: unknown }>(

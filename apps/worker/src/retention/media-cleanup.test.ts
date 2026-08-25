@@ -54,6 +54,18 @@ describe("terminal media cleanup", () => {
     expect(await transientState()).toMatchObject({ deletedAt: now, lastCleanupError: null });
   });
 
+  it("completes remote-source cleanup without deleting a synthetic object key", async () => {
+    await pool.query("UPDATE videos SET source_platform = 'bilibili', original_deleted_at = $2 WHERE id = $1", ["video_1", now]);
+    await pool.query("DELETE FROM transient_objects WHERE video_id = 'video_1'");
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(cleanupRunMedia({ runId: "run_1", storage, repository: createMediaCleanupRepository(pool), now })).resolves.toEqual({ status: "complete" });
+
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect(await runState()).toMatchObject({ cleanupStatus: "cleaned", attempts: 1 });
+    expect(await videoState()).toEqual({ status: "available", originalDeletedAt: now });
+  });
+
   it("records retry state after object-store failure without changing a completed run", async () => {
     const storage = { delete: vi.fn().mockRejectedValue(new Error("temporary S3 failure")) };
 
@@ -238,7 +250,7 @@ async function transientState() {
 const schema = [
   `CREATE TABLE videos (
     id TEXT PRIMARY KEY, object_key TEXT NOT NULL, status TEXT NOT NULL,
-    original_deleted_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL
+    source_platform TEXT NOT NULL DEFAULT 'upload', original_deleted_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL
   )`,
   `CREATE TABLE analysis_runs (
     id TEXT PRIMARY KEY, video_id TEXT NOT NULL, status TEXT NOT NULL,

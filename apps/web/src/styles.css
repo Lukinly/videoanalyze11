@@ -147,6 +147,21 @@ body { background: radial-gradient(circle at 8% 0%, #edf4ff 0, transparent 30rem
 .hero-copy > p:last-child { color: var(--muted); }
 .home-content { display: grid; gap: clamp(2rem, 5vw, 5rem); grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr); margin: clamp(4rem, 10vh, 8rem) auto 0; max-width: 1220px; align-items: end; }
 .home-content .upload-card { box-shadow: 0 20px 55px rgba(40, 43, 105, .09); }
+.source-picker { display: grid; gap: .8rem; min-width: 0; }
+.source-picker-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: .45rem; padding: .35rem; background: rgba(238, 239, 252, .9); border: 1px solid var(--line); border-radius: 999px; }
+.source-picker-tabs button { border: 0; border-radius: 999px; background: transparent; color: #646987; font-weight: 750; padding: .72rem 1rem; }
+.source-picker-tabs button.is-active { background: white; color: var(--blue); box-shadow: 0 5px 18px rgba(49, 54, 119, .12); }
+.link-video-card { grid-template-columns: 1fr auto; align-items: end; }
+.link-video-card label { display: grid; gap: .45rem; font-weight: 700; }
+.link-video-card input { border: 1px solid var(--line); border-radius: 12px; font: inherit; padding: .8rem .9rem; width: 100%; }
+.link-preview { display: grid; grid-column: 1 / -1; grid-template-columns: 112px 1fr auto; gap: 1rem; align-items: center; border-top: 1px solid var(--line); padding-top: 1rem; }
+.link-preview img { aspect-ratio: 16 / 9; border-radius: 10px; object-fit: cover; width: 112px; }
+.link-preview h3 { margin: .25rem 0; }
+.source-badge { color: var(--blue); font-size: .72rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.external-source-card { display: grid; grid-template-columns: minmax(180px, 42%) 1fr; gap: 1.4rem; align-items: center; min-height: 280px; padding: 1.5rem; border: 1px solid #29284b; border-radius: 15px; background: linear-gradient(135deg, #11142a, #292b52); color: white; }
+.external-source-card img { border-radius: 12px; object-fit: cover; width: 100%; }
+.external-source-card .primary-button { display: inline-block; margin-top: .8rem; text-decoration: none; }
+.external-source-card.compact { display: flex; flex-direction: column; min-height: 0; }
 .upload-card, .progress-card, .auth-card, .credit-panel, .account-card { border-color: var(--line); }
 .upload-copy h2, .section-heading h2, .summary-panel h2, .account-card h2 { color: #252d61; }
 

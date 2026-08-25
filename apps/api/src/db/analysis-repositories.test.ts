@@ -36,6 +36,16 @@ describe("analysis run repository", () => {
     expect(await repositories.runs.requestCancellation(user.id, run.id)).toMatchObject({ status: "cancelling" });
   });
 
+  it("returns the existing active run when the same video is started again", async () => {
+    const user = await repositories.users.create({ email: "idempotent@example.com", passwordHash: "hash" });
+    const video = await repositories.videos.create({ userId: user.id, objectKey: "users/idempotent/video", fileName: "video.mp4" });
+    const first = await repositories.runs.create({ id: "run_first", userId: user.id, videoId: video.id });
+    const second = await repositories.runs.create({ id: "run_second", userId: user.id, videoId: video.id });
+
+    expect(second.id).toBe(first.id);
+    expect((await pool.query("SELECT id FROM analysis_runs WHERE video_id = $1", [video.id])).rows).toHaveLength(1);
+  });
+
   it("reports chunk totals and completed chunks while a run is processing", async () => {
     const user = await repositories.users.create({ email: "chunks@example.com", passwordHash: "hash" });
     const video = await repositories.videos.create({ userId: user.id, objectKey: "users/chunks/video", fileName: "video.mp4" });

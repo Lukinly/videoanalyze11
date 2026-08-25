@@ -17,12 +17,14 @@ import type { createAdminRepository } from "./db/repositories/admin.js";
 import type { createUserRepository } from "./db/repositories/users.js";
 import { registerResultRoutes } from "./routes/results.js";
 import type { ResultService } from "./results/result-service.js";
+import { registerLinkImportRoutes, type LinkImportServiceContract } from "./routes/link-imports.js";
 
 export function buildApp(dependencies: {
   authService: AuthServiceContract;
   uploadService?: { start(input: { userId: string; fileName: string; contentType: string; contentLength: number }): Promise<unknown> };
   analysisService?: AnalysisServiceContract;
   resultService?: ResultService;
+  linkImportService?: LinkImportServiceContract;
   progressHub?: ReturnType<typeof createProgressHub>;
   readinessChecks?: ReadinessChecks;
   searchService?: SearchService;
@@ -61,6 +63,9 @@ export function buildApp(dependencies: {
   }
   if (dependencies.resultService) {
     app.register(async (instance) => registerResultRoutes(instance, { authService: dependencies.authService, resultService: dependencies.resultService! }));
+  }
+  if (dependencies.linkImportService) {
+    app.register(async (instance) => registerLinkImportRoutes(instance, { authService: dependencies.authService, linkImportService: dependencies.linkImportService! }));
   }
   if (dependencies.searchService) {
     app.register(async (instance) => registerSearchRoutes(instance, { authService: dependencies.authService, searchService: dependencies.searchService! }));

@@ -2,6 +2,7 @@ export * from "./analysis.js";
 export * from "./ai-notes.js";
 export * from "./auth.js";
 export * from "./billing.js";
+export * from "./link-source.js";
 export * from "./errors.js";
 export * from "./media.js";
 export * from "./provider.js";

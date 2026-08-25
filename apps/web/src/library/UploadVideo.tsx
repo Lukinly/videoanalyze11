@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { api, putUpload } from "../api/client";
 import type { RetentionMode } from "@videoanalyze/domain";
 
-export type UploadedVideo = { videoId: string; fileName: string; playbackUrl: string; fileSize: number; estimatedCost?: number; retentionMode: RetentionMode };
+export type UploadedVideo = { videoId: string; fileName: string; playbackUrl: string; fileSize: number; estimatedCost?: number; retentionMode: RetentionMode; sourcePlatform?: "upload" | "youtube" | "bilibili"; sourceUrl?: string | null; sourceAuthor?: string | null; thumbnailUrl?: string | null };
 
 export function UploadVideo({ onUploaded }: { onUploaded: (video: UploadedVideo) => void; availableCredits?: number }) {
   const inputRef = useRef<HTMLInputElement>(null);

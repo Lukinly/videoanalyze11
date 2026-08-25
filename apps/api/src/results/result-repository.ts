@@ -6,6 +6,7 @@ export type ResultMetadata = {
   fileName: string; retentionMode: RetentionMode; resultExpiresAt: Date | null; resultsDeletedAt: Date | null;
   duration: number | null; originalDeletedAt: Date | null; billedCredits: number | null; createdAt: Date; updatedAt: Date;
   billingRuleVersion: string | null; billedDurationSeconds: number | null; billedMinutes: number | null; reservedCredits: number | null;
+  sourcePlatform: "upload" | "youtube" | "bilibili"; sourceUrl: string | null; sourceAuthor: string | null; thumbnailUrl: string | null;
 };
 
 const metadataSelect = `SELECT run.id, run.user_id AS "userId", run.video_id AS "videoId",
@@ -14,7 +15,8 @@ const metadataSelect = `SELECT run.id, run.user_id AS "userId", run.video_id AS 
   run.results_deleted_at AS "resultsDeletedAt", run.created_at AS "createdAt", run.updated_at AS "updatedAt",
   run.billing_rule_version AS "billingRuleVersion", run.billed_duration_seconds AS "billedDurationSeconds",
   run.billed_minutes AS "billedMinutes", run.reserved_credits AS "reservedCredits",
-  video.duration, video.original_deleted_at AS "originalDeletedAt",
+  video.duration, video.original_deleted_at AS "originalDeletedAt", video.source_platform AS "sourcePlatform",
+  video.source_url AS "sourceUrl", video.source_author AS "sourceAuthor", video.thumbnail_url AS "thumbnailUrl",
   CASE WHEN reservation.status = 'consumed' THEN reservation.amount::int ELSE NULL END AS "billedCredits"
  FROM analysis_runs run JOIN videos video ON video.id = run.video_id
  LEFT JOIN credit_reservations reservation ON reservation.run_id = run.id`;

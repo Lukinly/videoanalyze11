@@ -38,6 +38,10 @@ export type AnalysisRun = {
   resultAvailability?: ResultAvailability;
   resultExpiresAt?: string | null;
   originalDeletedAt?: string | null;
+  sourcePlatform?: "upload" | "youtube" | "bilibili";
+  sourceUrl?: string | null;
+  sourceAuthor?: string | null;
+  thumbnailUrl?: string | null;
   transcript?: { segments: TranscriptSegment[]; mergeWarnings: string[] };
   summary?: {
     oneLineSummary: string;
@@ -61,6 +65,12 @@ export type UploadSession = {
   uploadUrl: string;
   expiresAt: string;
   fileSize: number;
+};
+
+export type LinkPreview = {
+  videoId: string | null; existingRunId: string | null; duplicateStatus: string | null;
+  platform: "youtube" | "bilibili"; canonicalUrl: string; title: string; author: string;
+  duration: number; thumbnailUrl: string; subtitleLanguage: string | null; estimatedCost: number;
 };
 
 export class ApiError extends Error {
@@ -113,6 +123,8 @@ export const api = {
     method: "POST",
     body: JSON.stringify(input)
   }),
+  previewLink: (url: string) => request<LinkPreview>("/api/link-imports/preview", { method: "POST", body: JSON.stringify({ url }) }),
+  confirmLink: (url: string) => request<LinkPreview & { videoId: string }>("/api/link-imports/confirm", { method: "POST", body: JSON.stringify({ url }) }),
   startAnalysis: (videoId: string, retentionMode: RetentionMode = "standard") => request<AnalysisRun>(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST", body: JSON.stringify({ retentionMode }) }),
   getAnalysis: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${encodeURIComponent(runId)}`),
   listAnalyses: (limit = 50) => request<{ items: AnalysisRun[] }>(`/api/analysis-runs?limit=${limit}`),

@@ -39,4 +39,14 @@ describe("database migrations", () => {
     expect(sql).toContain("CREATE TABLE ai_notes");
     expect(sql).toContain("CREATE TABLE ephemeral_ai_notes");
   });
+
+  it("stores normalized external video source metadata", async () => {
+    const sql = await readFile(join(migrations, "0009_link_video_sources.sql"), "utf8");
+    expect(sql).toContain("source_platform");
+    expect(sql).toContain("source_url");
+    expect(sql).toContain("external_video_id");
+    expect(sql).toContain("source_part");
+    expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS videos_external_source_idx");
+    expect(sql).not.toContain("analysis_runs_one_active_per_video_idx");
+  });
 });
