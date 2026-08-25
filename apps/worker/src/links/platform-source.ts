@@ -57,7 +57,7 @@ export function bilibiliSourceCommand(mode: "subtitle" | "audio", rawUrl: string
   const part = Number(url.searchParams.get("p") ?? 1);
   const bvid = url.pathname.match(/\/video\/(BV[1-9A-HJ-NP-Za-km-z]{10})(?:\/|$)/)?.[1];
   if (!bvid || !Number.isSafeInteger(part) || part < 1) throw new Error("invalid Bilibili source URL");
-  if (part > 1) {
+  if (mode === "audio" || part > 1) {
     const args = [process.env.BILIBILI_PART_HELPER ?? "/app/bilibili-part.py", mode, bvid, String(part)];
     if (mode === "audio") args.push(directory);
     return { command: "python3", args };

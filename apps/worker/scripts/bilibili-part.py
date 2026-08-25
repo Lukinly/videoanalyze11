@@ -41,7 +41,12 @@ async def subtitle(item: video.Video, page_index: int):
 async def audio(item: video.Video, page_index: int, output_dir: str):
     download = await item.get_download_url(page_index=page_index)
     detector = VideoDownloadURLDataDetecter(download)
-    streams = detector.detect_best_streams(audio_max_quality=AudioQuality._64K, no_dolby_audio=True, no_hires=True)
+    streams = detector.detect_best_streams(
+        audio_max_quality=AudioQuality._64K,
+        codecs=[],
+        no_dolby_audio=True,
+        no_hires=True,
+    )
     candidates = [stream for stream in streams if stream is not None and hasattr(stream, "audio_quality")]
     if not candidates and not detector.check_flv_mp4_stream() and len(streams) >= 2 and streams[1] is not None:
         candidates = [streams[1]]
