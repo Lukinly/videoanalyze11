@@ -68,8 +68,9 @@ sudo update-ca-certificates
 
 if command -v powershell.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
   windows_certificate=$(wslpath -w "$CERT_FILE")
-  powershell.exe -NoProfile -NonInteractive -Command \
-    "\$imported = Import-Certificate -FilePath '$windows_certificate' -CertStoreLocation 'Cert:\\CurrentUser\\Root'; if (\$null -eq \$imported) { exit 1 }" >/dev/null
+  windows_certificate=${windows_certificate//\'/\'\'}
+  powershell.exe -NoProfile -Command \
+    "\$ErrorActionPreference = 'Stop'; \$temporary = Join-Path ([System.IO.Path]::GetTempPath()) ('videoanalyze-local-root-' + [guid]::NewGuid().ToString('N') + '.crt'); try { Copy-Item -LiteralPath '$windows_certificate' -Destination \$temporary; \$imported = Import-Certificate -FilePath \$temporary -CertStoreLocation 'Cert:\\CurrentUser\\Root'; if (\$null -eq \$imported) { exit 1 } } finally { Remove-Item -LiteralPath \$temporary -Force -ErrorAction SilentlyContinue }" >/dev/null
   echo "Installed the local CA into the Windows CurrentUser root store."
 else
   echo "Windows certificate import was skipped; import $CERT_FILE into the Windows Trusted Root store if needed." >&2

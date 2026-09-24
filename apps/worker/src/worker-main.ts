@@ -65,6 +65,7 @@ const longVideoSemaphore = new FifoSemaphore(positiveInteger(env.longVideoConcur
 const perUserSemaphore = new KeyedFifoSemaphore(1);
 const media: ReturnType<typeof createMediaProcessor> = {
   probe: rawMedia.probe,
+  probeAudio: rawMedia.probeAudio,
   extractAudio: (...args) => ffmpegSemaphore.run(() => rawMedia.extractAudio(...args)),
   renderChunk: (...args) => ffmpegSemaphore.run(() => rawMedia.renderChunk(...args)),
   remuxToMp4: (...args) => ffmpegSemaphore.run(() => rawMedia.remuxToMp4(...args))
@@ -118,7 +119,7 @@ const consumer = createAnalysisConsumer({
                 transcriptImported = true;
               } else {
                 const audioPath = await platformSources.downloadAudio(source.remote, directory, job.signal);
-                const downloaded = await media.probe(audioPath);
+                const downloaded = await media.probeAudio(audioPath);
                 if (downloaded.duration > MAX_VIDEO_DURATION_SECONDS) throw new Error("downloaded audio exceeds the four-hour limit");
                 state.setRemoteInput(audioPath, downloaded.duration);
               }

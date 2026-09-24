@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { type MediaInfo } from "@videoanalyze/domain";
 import { buildAudioChunkArgs, buildExtractAudioArgs, buildRemuxArgs } from "./ffmpeg.js";
-import { parseFfprobeJson } from "./ffprobe.js";
+import { parseAudioFfprobeJson, parseFfprobeJson } from "./ffprobe.js";
 import { createProcessRunner } from "./process-runner.js";
 
 export function createMediaProcessor(input: { ffmpegPath?: string; ffprobePath?: string; runner?: ReturnType<typeof createProcessRunner> }) {
@@ -13,6 +13,10 @@ export function createMediaProcessor(input: { ffmpegPath?: string; ffprobePath?:
     async probe(inputPath: string): Promise<MediaInfo> {
       const result = await runner.run(ffprobePath, ["-v", "error", "-show_format", "-show_streams", "-of", "json", inputPath]);
       return parseFfprobeJson(result.stdout);
+    },
+    async probeAudio(inputPath: string) {
+      const result = await runner.run(ffprobePath, ["-v", "error", "-show_format", "-show_streams", "-of", "json", inputPath]);
+      return parseAudioFfprobeJson(result.stdout);
     },
     async extractAudio(videoPath: string, outputPath: string, audioIndex = 0, signal?: AbortSignal): Promise<void> {
       await runner.run(ffmpegPath, buildExtractAudioArgs(videoPath, outputPath, audioIndex), { signal });

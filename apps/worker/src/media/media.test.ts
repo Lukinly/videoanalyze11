@@ -65,4 +65,21 @@ describe("media processing", () => {
       audioTracks: [{ index: 0, codec: "aac", language: "eng", channels: 2 }]
     });
   });
+
+  it("probes a downloaded audio-only source without requiring a video stream", async () => {
+    const { createMediaProcessor } = await import("./media-processor.js");
+    const processor = createMediaProcessor({ runner: { run: async () => ({
+      stdout: JSON.stringify({
+        format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", duration: "198.042" },
+        streams: [{ codec_type: "audio", codec_name: "aac", channels: 2 }]
+      }),
+      stderr: ""
+    }) } });
+
+    await expect(processor.probeAudio("source.m4a")).resolves.toEqual({
+      duration: 198.042,
+      container: "mov",
+      audioTracks: [{ index: 0, codec: "aac", language: null, channels: 2 }]
+    });
+  });
 });

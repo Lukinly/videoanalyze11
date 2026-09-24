@@ -2,7 +2,7 @@ import { createRef } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { CreditBalance, PublicUser } from "../api/client";
+import type { AnalysisRun, CreditBalance, PublicUser } from "../api/client";
 import type { UploadedVideo } from "../library/UploadVideo";
 import type { PlayerController } from "../player/VideoPlayer";
 import { WatchingWorkspace } from "./WatchingWorkspace";
@@ -18,6 +18,7 @@ const user: PublicUser = {
 
 const credits: CreditBalance = { ledgerBalance: 12, held: 2, available: 10 };
 const video: UploadedVideo = { videoId: "video-1", fileName: "demo.mp4", playbackUrl: "blob:demo", fileSize: 100, estimatedCost: 1, retentionMode: "standard" };
+const completedRun: AnalysisRun = { id: "run-1", videoId: "video-1", fileName: "demo.mp4", duration: 120, status: "completed", stage: "completed", retentionMode: "standard", resultAvailability: "available" };
 describe("WatchingWorkspace", () => {
   it("renders the immersive player and content navigation", async () => {
     const userEventApi = userEvent.setup();
@@ -47,5 +48,21 @@ describe("WatchingWorkspace", () => {
     } finally {
       Reflect.deleteProperty(URL, "revokeObjectURL");
     }
+  });
+
+  it("hides local-player controls for a remote video while keeping result actions", () => {
+    const remoteVideo: UploadedVideo = {
+      ...video,
+      playbackUrl: "",
+      sourcePlatform: "youtube",
+      sourceUrl: "https://www.youtube.com/watch?v=remote123"
+    };
+
+    render(<WatchingWorkspace user={user} credits={credits} video={remoteVideo} run={completedRun} playerRef={createRef<PlayerController>()} onCompleted={vi.fn()} onLogout={vi.fn()} onAttach={vi.fn()} onDeleted={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "开启声音" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("重新选择本地原视频")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出 Markdown" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "永久删除结果" })).toBeVisible();
   });
 });

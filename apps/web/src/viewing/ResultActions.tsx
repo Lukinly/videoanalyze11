@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { api, type AnalysisRun } from "../api/client";
 import { exportAnalysisMarkdown } from "./export-markdown";
 
-export function ResultActions({ run, onAttach, onDeleted, inspectLocalFile = inspectDuration }: {
+export function ResultActions({ run, onAttach, onDeleted, inspectLocalFile = inspectDuration, allowLocalAttach = true }: {
   run: AnalysisRun;
   onAttach: (url: string, fileName: string) => void;
   onDeleted?: () => void;
   inspectLocalFile?: (file: File, url: string) => Promise<number>;
+  allowLocalAttach?: boolean;
 }) {
   const localUrl = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +48,7 @@ export function ResultActions({ run, onAttach, onDeleted, inspectLocalFile = ins
   }
 
   return <div className="result-actions">
-    <label className="secondary-button local-file-button">重新选择本地原视频<input className="visually-hidden" aria-label="重新选择本地原视频" type="file" accept="video/*" onChange={(event) => void attach(event.target.files?.[0])} /></label>
+    {allowLocalAttach && <label className="secondary-button local-file-button">重新选择本地原视频<input className="visually-hidden" aria-label="重新选择本地原视频" type="file" accept="video/*" onChange={(event) => void attach(event.target.files?.[0])} /></label>}
     {run.resultAvailability === "available" && <button className="secondary-button" type="button" onClick={downloadMarkdown}>导出 Markdown</button>}
     {run.resultAvailability !== "deleted" && <button className="danger-button" type="button" onClick={() => void deleteResults()}>永久删除结果</button>}
     {error && <p className="error-text">{error}</p>}
