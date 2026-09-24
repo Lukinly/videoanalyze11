@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle, useRef } from "react";
 
 export type PlayerController = {
   seek(seconds: number): void;
+  enableSound(): void;
   getCurrentTime(): number;
   getPaused(): boolean;
 };
@@ -19,6 +20,11 @@ export const VideoPlayer = forwardRef<PlayerController, VideoPlayerProps>(functi
   useImperativeHandle(ref, () => ({
     seek(seconds: number) {
       if (videoRef.current) videoRef.current.currentTime = Math.max(0, seconds);
+    },
+    enableSound() {
+      if (!videoRef.current) return;
+      videoRef.current.muted = false;
+      videoRef.current.volume = 1;
     },
     getCurrentTime: () => videoRef.current?.currentTime ?? 0,
     getPaused: () => videoRef.current?.paused ?? true

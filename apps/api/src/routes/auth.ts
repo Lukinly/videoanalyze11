@@ -1,17 +1,27 @@
 import type { FastifyInstance } from "fastify";
+import { DomainError } from "@videoanalyze/domain";
 
 export type AuthServiceContract = {
-  register(input: { email: string; password: string }): Promise<{ userId: string; verificationSent: boolean }>;
+  sendRegistrationCode(input: { email: string }): Promise<{ sent: true; expiresInSeconds: 600 }>;
+  register(input: { email: string; password: string; confirmPassword: string; verificationCode: string }): Promise<{ userId: string; verified: true }>;
   verifyEmail(token: string): Promise<{ userId: string; trialCreditsGranted: boolean }>;
   login(input: { email: string; password: string }): Promise<{ sessionToken: string; user: unknown }>;
   authenticate(sessionToken: string): Promise<unknown>;
   logout(sessionToken: string): Promise<void>;
+  resetPassword?(input: { token: string; password: string; confirmPassword: string }): Promise<{ ok: true }>;
+  changePassword?(input: { userId: string; password: string; confirmPassword: string }): Promise<{ ok: true }>;
 };
 
 const SESSION_COOKIE = "video_session";
 
 export async function registerAuthRoutes(app: FastifyInstance, authService: AuthServiceContract, options: { secureCookies?: boolean } = {}) {
-  app.post<{ Body: { email: string; password: string } }>("/api/auth/register", async (request, reply) => {
+  app.post<{ Body: { email: string } }>("/api/auth/registration-code", async (request, reply) => {
+    if (!request.body || typeof request.body.email !== "string") throw new DomainError("INVALID_CREDENTIALS", "email is required", 400);
+    return reply.code(202).send(await authService.sendRegistrationCode({ email: request.body.email }));
+  });
+
+  app.post<{ Body: { email: string; password: string; confirmPassword: string; verificationCode: string } }>("/api/auth/register", async (request, reply) => {
+    if (!request.body || typeof request.body.email !== "string" || typeof request.body.password !== "string" || typeof request.body.confirmPassword !== "string" || typeof request.body.verificationCode !== "string") throw new DomainError("INVALID_CREDENTIALS", "email, password, confirmation and verification code are required", 400);
     const result = await authService.register(request.body);
     return reply.code(202).send(result);
   });
@@ -22,6 +32,7 @@ export async function registerAuthRoutes(app: FastifyInstance, authService: Auth
   });
 
   app.post<{ Body: { email: string; password: string } }>("/api/auth/login", async (request, reply) => {
+    if (!request.body || typeof request.body.email !== "string" || typeof request.body.password !== "string") throw new DomainError("INVALID_CREDENTIALS", "email and password are required", 400);
     const result = await authService.login(request.body);
     reply.setCookie(SESSION_COOKIE, result.sessionToken, {
       httpOnly: true,
@@ -44,5 +55,21 @@ export async function registerAuthRoutes(app: FastifyInstance, authService: Auth
     if (sessionToken) await authService.logout(sessionToken);
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return reply.code(204).send();
+  });
+
+  app.post<{ Body: { token: string; password: string; confirmPassword: string } }>("/api/auth/password-reset", async (request, reply) => {
+    if (!authService.resetPassword) return reply.code(501).send({ code: "NOT_IMPLEMENTED", message: "password reset unavailable" });
+    if (!request.body || typeof request.body.token !== "string" || typeof request.body.password !== "string" || typeof request.body.confirmPassword !== "string") throw new DomainError("INVALID_RESET_TOKEN", "token, password and confirmation are required", 400);
+    return reply.send(await authService.resetPassword(request.body));
+  });
+
+  app.post<{ Body: { password: string; confirmPassword: string } }>("/api/auth/change-password", async (request, reply) => {
+    const sessionToken = request.cookies[SESSION_COOKIE];
+    if (!sessionToken) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
+    const user = await authService.authenticate(sessionToken) as { id?: string };
+    if (!user.id) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
+    if (!authService.changePassword) return reply.code(501).send({ code: "NOT_IMPLEMENTED", message: "password change unavailable" });
+    if (!request.body || typeof request.body.password !== "string" || typeof request.body.confirmPassword !== "string") throw new DomainError("INVALID_CREDENTIALS", "password and confirmation are required", 400);
+    return reply.send(await authService.changePassword({ userId: user.id, ...request.body }));
   });
 }

@@ -1,0 +1,11 @@
+sudo docker compose -f infra/docker-compose.yml up -d --build
+sudo docker compose -f infra/docker-compose.yml ps
+curl http://localhost/healthz
+curl http://localhost/readyz
+
+01 【DS-v3 本地部署】1.1 DeepSeek v3开源情况介绍.mp4
+http://localhost
+
+cd /mnt/v/Vworkspace/videoanlast
+sudo docker compose -f infra/docker-compose.yml up -d --build --force-recreate api minio proxy
+sudo docker compose -f infra/docker-compose.yml ps

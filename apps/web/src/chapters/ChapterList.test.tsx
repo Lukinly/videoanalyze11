@@ -7,10 +7,11 @@ describe("ChapterList", () => {
   it("seeks to a chapter's aligned start", async () => {
     const user = userEvent.setup();
     const seek = vi.fn();
-    render(<ChapterList chapters={[{ id: "ch1", title: "背景", start: 42, end: 60 }]} onSeek={seek} />);
+    render(<ChapterList chapters={[{ id: "ch1", title: "背景", start: 42, end: 60, bullets: [{ text: "背景要点", sourceSegmentIds: ["s1"] }] }]} onSeek={seek} />);
 
     await user.click(screen.getByRole("button", { name: /背景/ }));
 
     expect(seek).toHaveBeenCalledWith(42);
+    expect(screen.getByText("背景要点")).toBeVisible();
   });
 });

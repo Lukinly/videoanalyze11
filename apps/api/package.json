@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node --watch dist/server.js",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "admin:create": "corepack pnpm build && node dist/cli/admin-create.js"
   },
   "dependencies": {
     "@videoanalyze/domain": "workspace:*",

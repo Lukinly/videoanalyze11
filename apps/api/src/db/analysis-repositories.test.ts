@@ -35,4 +35,50 @@ describe("analysis run repository", () => {
     expect(await repositories.runs.findOwnedById(other.id, run.id)).toBeNull();
     expect(await repositories.runs.requestCancellation(user.id, run.id)).toMatchObject({ status: "cancelling" });
   });
+
+  it("reports chunk totals and completed chunks while a run is processing", async () => {
+    const user = await repositories.users.create({ email: "chunks@example.com", passwordHash: "hash" });
+    const video = await repositories.videos.create({ userId: user.id, objectKey: "users/chunks/video", fileName: "video.mp4" });
+    const run = await repositories.runs.create({ id: "run_chunks", userId: user.id, videoId: video.id });
+
+    await pool.query(
+      `INSERT INTO chunks (id, user_id, run_id, chunk_index, start_seconds, end_seconds, object_key, status)
+       VALUES ('chunk_0', $1, $2, 0, 0, 10, 'users/chunks/run/chunk_0.flac', 'completed'),
+              ('chunk_1', $1, $2, 1, 10, 20, 'users/chunks/run/chunk_1.flac', 'processing')`,
+      [user.id, run.id]
+    );
+
+    expect(await repositories.runs.findOwnedById(user.id, run.id)).toMatchObject({ totalChunks: 2, completedChunks: 1 });
+  });
+
+  it("assembles transcript and summary results for a completed run", async () => {
+    const user = await repositories.users.create({ email: "results@example.com", passwordHash: "hash" });
+    const video = await repositories.videos.create({ userId: user.id, objectKey: "users/results/video", fileName: "video.mp4" });
+    const run = await repositories.runs.create({ id: "run_results", userId: user.id, videoId: video.id });
+
+    await pool.query(
+      `INSERT INTO transcript_segments (id, user_id, run_id, start_seconds, end_seconds, text) VALUES
+       ('run_results_seg_1', $1, $2, 0, 5, 'hello'),
+       ('run_results_seg_2', $1, $2, 5, 10, 'world')`,
+      [user.id, run.id]
+    );
+    await pool.query(
+      `INSERT INTO chapters (id, user_id, run_id, title, start_seconds, end_seconds, summary, bullets_json, source_segment_ids_json, alignment_warning)
+       VALUES ('ch1', $1, $2, '开场', 0, 5, '简介', '[]', '["run_results_seg_1"]', true)`,
+      [user.id, run.id]
+    );
+    await pool.query(
+      `UPDATE analysis_runs SET summary_json = $2, stage = 'completed', status = 'completed', progress = 1 WHERE id = $1`,
+      [run.id, JSON.stringify({ oneLineSummary: "一句话", overallSummary: "整体" })]
+    );
+
+    const result = await repositories.runs.findOwnedById(user.id, run.id);
+    expect(result?.transcript?.segments).toHaveLength(2);
+    expect(result?.transcript?.segments[0]).toMatchObject({ id: "run_results_seg_1", runId: run.id, start: 0, end: 5, text: "hello" });
+    expect(result?.summary).toMatchObject({
+      oneLineSummary: "一句话",
+      overallSummary: "整体",
+      chapters: [{ id: "ch1", title: "开场", start: 0, end: 5, sourceSegmentIds: ["run_results_seg_1"], alignmentWarning: true }]
+    });
+  });
 });

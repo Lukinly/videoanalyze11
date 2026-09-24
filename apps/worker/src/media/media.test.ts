@@ -29,6 +29,13 @@ describe("media processing", () => {
     expect(manifest.chunks.every((chunk) => chunk.estimatedBytes <= 100)).toBe(true);
   });
 
+  it("re-encodes chunk slices so FLAC STREAMINFO matches the true chunk duration", async () => {
+    const { buildAudioChunkArgs } = await import("./ffmpeg.js");
+    expect(buildAudioChunkArgs("audio.flac", "chunk-1.flac", 600, 38.7)).toEqual([
+      "-ss", "600", "-i", "audio.flac", "-t", "38.7", "-c:a", "flac", "-y", "chunk-1.flac"
+    ]);
+  });
+
   it("uses the first audio stream and mono 16 kHz output", async () => {
     const { buildExtractAudioArgs } = await import("./ffmpeg.js");
     expect(buildExtractAudioArgs("input.mp4", "audio.flac", 0)).toEqual([

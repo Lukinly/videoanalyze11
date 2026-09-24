@@ -19,6 +19,7 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
 
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollingStopped = false;
     let unsubscribe: () => void = () => undefined;
 
     const refresh = async () => {
@@ -27,6 +28,9 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
         if (disposed) return;
         setRun(current);
         if (current.status === "completed") onCompleted?.(current);
+        if (["completed", "failed", "cancelled"].includes(current.status)) {
+          pollingStopped = true;
+        }
       } catch {
         if (!disposed) setConnectionState("无法读取任务状态");
       }
@@ -49,11 +53,13 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
     };
 
     void refresh();
+    const pollTimer = setInterval(() => { if (!pollingStopped) void refresh(); }, 1000);
     connect();
     return () => {
       disposed = true;
       unsubscribe();
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pollTimer) clearInterval(pollTimer);
     };
   }, [onCompleted, runId]);
 

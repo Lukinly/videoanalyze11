@@ -10,6 +10,11 @@ import { registerSearchRoutes } from "./routes/search.js";
 import type { SearchService } from "./search/search-service.js";
 import { registerMediaRoutes, type MediaService } from "./routes/media.js";
 import { deleteVideo } from "./routes/videos-delete.js";
+import { registerCreditRoutes } from "./routes/credits.js";
+import { registerAdminRoutes } from "./routes/admin.js";
+import type { createCreditRepository } from "./db/repositories/credits.js";
+import type { createAdminRepository } from "./db/repositories/admin.js";
+import type { createUserRepository } from "./db/repositories/users.js";
 
 export function buildApp(dependencies: {
   authService: AuthServiceContract;
@@ -19,6 +24,10 @@ export function buildApp(dependencies: {
   readinessChecks?: ReadinessChecks;
   searchService?: SearchService;
   mediaService?: MediaService;
+  credits?: Pick<ReturnType<typeof createCreditRepository>, "getBalance" | "listLedger">;
+  topups?: Pick<ReturnType<typeof createAdminRepository>, "createTopup" | "listTopups">;
+  users?: Pick<ReturnType<typeof createUserRepository>, "list" | "findById" | "setRole" | "setStatus" | "setMustChangePassword">;
+  adminRepository?: ReturnType<typeof createAdminRepository>;
   videoDeletion?: { videos: { listOwnedObjectKeys(userId: string, videoId: string): Promise<string[] | null>; markDeleted(userId: string, videoId: string): Promise<void> }; storage: { delete(key: string): Promise<void> } };
   secureCookies?: boolean;
 }): FastifyInstance {
@@ -62,6 +71,12 @@ export function buildApp(dependencies: {
       const deleted = await deleteVideo({ userId: user.id, videoId: request.params.videoId, ...dependencies.videoDeletion! });
       return deleted ? reply.code(204).send() : reply.code(404).send({ code: "NOT_FOUND", message: "video not found" });
     });
+  }
+  if (dependencies.credits && dependencies.topups) {
+    app.register(async (instance) => registerCreditRoutes(instance, { authService: dependencies.authService, credits: dependencies.credits!, topups: dependencies.topups! }));
+  }
+  if (dependencies.credits && dependencies.users && dependencies.adminRepository) {
+    app.register(async (instance) => registerAdminRoutes(instance, { authService: dependencies.authService, credits: dependencies.credits!, users: dependencies.users!, adminRepository: dependencies.adminRepository! }));
   }
   return app;
 }

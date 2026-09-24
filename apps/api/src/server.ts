@@ -1,4 +1,4 @@
-import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import { HeadBucketCommand } from "@aws-sdk/client-s3";
 import { Queue } from "bullmq";
 import { buildApp } from "./app.js";
 import { createAnalysisService } from "./analysis/analysis-service.js";
@@ -7,6 +7,7 @@ import { parseEnv } from "./config/env.js";
 import { createDatabase } from "./db/client.js";
 import { createRepositories } from "./db/repositories/index.js";
 import { createSearchService } from "./search/search-service.js";
+import { createS3Client } from "./storage/s3-client.js";
 import { createS3ObjectStorage } from "./storage/s3-storage.js";
 import { createUploadService } from "./storage/upload-service.js";
 import { DomainError } from "@videoanalyze/domain";
@@ -14,17 +15,26 @@ import { DomainError } from "@videoanalyze/domain";
 const env = parseEnv();
 const { pool } = createDatabase(env.databaseUrl);
 const repositories = createRepositories(pool);
-const s3 = new S3Client({
-  endpoint: env.s3Endpoint,
-  region: env.s3Region,
-  forcePathStyle: true,
-  credentials: { accessKeyId: env.s3AccessKey, secretAccessKey: env.s3SecretKey }
-});
-const storage = createS3ObjectStorage({ client: s3 as never, bucket: env.s3Bucket });
+const s3 = createS3Client({ endpoint: env.s3Endpoint, region: env.s3Region, accessKey: env.s3AccessKey, secretKey: env.s3SecretKey });
+const s3Presign = createS3Client({ endpoint: env.s3PublicEndpoint, region: env.s3Region, accessKey: env.s3AccessKey, secretKey: env.s3SecretKey });
+const storage = createS3ObjectStorage({ client: s3 as never, presignClient: s3Presign as never, bucket: env.s3Bucket });
 const authService = createAuthService({
   repositories,
   verificationBaseUrl: env.verificationBaseUrl,
   mailer: {
+    async sendRegistrationCode(input) {
+      const response = await fetch(env.mailApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          From: { Email: "no-reply@videoanalyze.local", Name: "videoanalyze" },
+          To: [{ Email: input.email }],
+          Subject: "验证你的 videoanalyze 注册验证码",
+          Text: `你的注册验证码是：${input.code}\n验证码 10 分钟内有效。`
+        })
+      });
+      if (!response.ok) throw new Error("registration code email delivery failed");
+    },
     async sendVerification(input) {
       const response = await fetch(env.mailApiUrl, {
         method: "POST",
@@ -37,6 +47,19 @@ const authService = createAuthService({
         })
       });
       if (!response.ok) throw new Error("verification email delivery failed");
+    },
+    async sendPasswordReset(input) {
+      const response = await fetch(env.mailApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          From: { Email: "no-reply@videoanalyze.local", Name: "videoanalyze" },
+          To: [{ Email: input.email }],
+          Subject: "重置你的 videoanalyze 密码",
+          Text: `请打开以下链接设置新密码：${input.link}`
+        })
+      });
+      if (!response.ok) throw new Error("password reset email delivery failed");
     }
   }
 });
@@ -46,7 +69,11 @@ const app = buildApp({
   authService,
   secureCookies: env.nodeEnv === "production",
   uploadService: createUploadService({ videos: repositories.videos, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds }),
-  analysisService: createAnalysisService({ videos: repositories.videos, usage: repositories.usage, runs: repositories.runs, queue }),
+  analysisService: createAnalysisService({ videos: repositories.videos, credits: repositories.credits, runs: repositories.runs, queue }),
+  credits: repositories.credits,
+  topups: repositories.admin,
+  users: repositories.users,
+  adminRepository: repositories.admin,
   searchService: createSearchService({ search: repositories.search }),
   mediaService: {
     async getPlaybackUrl(input) {

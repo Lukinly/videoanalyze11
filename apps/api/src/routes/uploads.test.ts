@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 describe("upload routes", () => {
   const authService = {
-    register: vi.fn(), verifyEmail: vi.fn(), login: vi.fn(), logout: vi.fn(),
+    sendRegistrationCode: vi.fn(), register: vi.fn(), verifyEmail: vi.fn(), login: vi.fn(), logout: vi.fn(),
     authenticate: vi.fn().mockResolvedValue({ id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() })
   };
   const uploadService = {

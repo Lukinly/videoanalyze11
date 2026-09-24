@@ -38,4 +38,25 @@ describe("object storage", () => {
     expect(presign).toHaveBeenCalledOnce();
     expect(JSON.stringify(presign.mock.calls[0][1])).toContain("users/u1/videos/v1/original");
   }, 30_000);
+
+  it("uses the browser-facing client when generating a presigned upload URL", async () => {
+    const { createS3ObjectStorage } = await import("./s3-storage.js");
+    const internalClient = { send: vi.fn() };
+    const browserClient = { send: vi.fn() };
+    const presign = vi.fn().mockResolvedValue("http://localhost:9000/signed/upload");
+    const storage = createS3ObjectStorage({
+      client: internalClient,
+      presignClient: browserClient,
+      bucket: "private-bucket",
+      presign
+    });
+
+    await storage.createUpload({
+      objectKey: "users/u1/videos/v1/original",
+      contentType: "video/mp4",
+      contentLength: 10
+    });
+
+    expect(presign).toHaveBeenCalledWith(browserClient, expect.anything(), { expiresIn: 900 });
+  }, 30_000);
 });

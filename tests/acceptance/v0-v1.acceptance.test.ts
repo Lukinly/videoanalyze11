@@ -9,7 +9,7 @@ import { createV1SummaryRunner } from "../../apps/worker/src/summary/v1-runner.j
 import { parseFfprobeJson } from "../../apps/worker/src/media/ffprobe.js";
 
 const requiredScenarios = [
-  "verified user receives exactly two credits",
+  "verified user receives exactly twelve credits",
   "unverified user cannot analyze",
   "two users cannot read each other's videos",
   "completed ASR chunks are not resubmitted after restart",
@@ -29,24 +29,24 @@ describe("V0/V1 acceptance scenarios", () => {
 
 async function runAcceptanceScenario(scenario: typeof requiredScenarios[number]) {
   switch (scenario) {
-    case "verified user receives exactly two credits": {
+    case "verified user receives exactly twelve credits": {
       const memory = createAuthMemory();
       const auth = createAuthService({ repositories: memory.repositories, mailer: memory.mailer, verificationBaseUrl: "http://localhost" });
-      await auth.register({ email: "accept@example.com", password: "correct horse battery staple" });
-      const token = memory.mailer.sendVerification.mock.calls[0][0].token as string;
-      await auth.verifyEmail(token);
-      await auth.verifyEmail(token);
-      expect(memory.credits).toBe(2);
+      await auth.sendRegistrationCode({ email: "accept@example.com" });
+      const code = memory.mailer.sendRegistrationCode.mock.calls[0][0].code as string;
+      await auth.register({ email: "accept@example.com", password: "correct horse battery staple", confirmPassword: "correct horse battery staple", verificationCode: code });
+      await expect(auth.login({ email: "accept@example.com", password: "correct horse battery staple" })).resolves.toMatchObject({ user: { id: "u1" } });
+      expect(memory.credits).toBe(12);
       return { status: "passed" as const };
     }
     case "unverified user cannot analyze": {
       const result = createAnalysisService({
-        videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "v1", userId: "u1" }) },
-        usage: { reserveAnalysis: vi.fn().mockResolvedValue("exhausted"), releaseAnalysis: vi.fn() },
+        videos: { findOwnedById: vi.fn().mockResolvedValue({ id: "v1", userId: "u1", fileSize: 1 }) },
+        credits: { reserveAnalysis: vi.fn().mockResolvedValue("exhausted"), releaseReservation: vi.fn() },
         runs: { create: vi.fn(), findOwnedById: vi.fn(), requestCancellation: vi.fn() },
         queue: { add: vi.fn() }
       });
-      await expect(result.start({ userId: "u1", videoId: "v1" })).rejects.toMatchObject({ code: "QUOTA_EXHAUSTED" });
+      await expect(result.start({ userId: "u1", videoId: "v1" })).rejects.toMatchObject({ code: "CREDITS_EXHAUSTED" });
       return { status: "passed" as const };
     }
     case "two users cannot read each other's videos": {
@@ -91,13 +91,15 @@ async function runAcceptanceScenario(scenario: typeof requiredScenarios[number])
 }
 
 function createAuthMemory() {
-  const users = new Map<string, { id: string; email: string; passwordHash: string; emailVerifiedAt: Date | null }>();
+  const users = new Map<string, { id: string; email: string; passwordHash: string; emailVerifiedAt: Date | null; role: "user" | "admin"; status: "active" | "suspended"; mustChangePassword: boolean }>();
   const verifications = new Map<string, { id: string; userId: string; expiresAt: Date; usedAt: Date | null }>();
-  const mailer = { sendVerification: vi.fn() };
+  const registrationCodes = new Map<string, { id: string; email: string; codeHash: string; expiresAt: Date; usedAt: Date | null; attempts: number; createdAt: Date }>();
+  const mailer = { sendVerification: vi.fn(), sendRegistrationCode: vi.fn() };
   let credits = 0;
+  let registrationSequence = 0;
   const repositories = {
     users: {
-      create: vi.fn(async (input: { email: string; passwordHash: string }) => { const user = { id: "u1", email: input.email, passwordHash: input.passwordHash, emailVerifiedAt: null }; users.set(user.id, user); return user; }),
+      create: vi.fn(async (input: { email: string; passwordHash: string; emailVerifiedAt?: Date | null }) => { const user = { id: "u1", email: input.email, passwordHash: input.passwordHash, emailVerifiedAt: input.emailVerifiedAt ?? null, role: "user" as const, status: "active" as const, mustChangePassword: false }; users.set(user.id, user); return user; }),
       findByEmail: vi.fn(async (email: string) => [...users.values()].find((user) => user.email === email) ?? null),
       findById: vi.fn(async (id: string) => users.get(id) ?? null),
       markEmailVerified: vi.fn(async (id: string, verifiedAt: Date) => { const user = users.get(id); if (user) user.emailVerifiedAt = verifiedAt; })
@@ -105,10 +107,20 @@ function createAuthMemory() {
     auth: {
       createVerification: vi.fn(async (input: { userId: string; tokenHash: string; expiresAt: Date }) => { verifications.set(input.tokenHash, { id: "verification", userId: input.userId, expiresAt: input.expiresAt, usedAt: null }); }),
       findVerification: vi.fn(async () => [...verifications.values()][0] ?? null),
-      markVerificationUsed: vi.fn(async (id: string, usedAt: Date) => { void id; const verification = [...verifications.values()][0]; if (verification) verification.usedAt = usedAt; }),
-      createSession: vi.fn(), findSession: vi.fn(), revokeSession: vi.fn()
+      markVerificationUsed: vi.fn(async (id: string, usedAt: Date) => { void id; const verification = [...verifications.values()][0]; if (verification?.usedAt) return false; if (verification) verification.usedAt = usedAt; return true; }),
+      createRegistrationCode: vi.fn(async (input: { email: string; codeHash: string; expiresAt: Date; createdAt: Date; rateLimitBefore: Date }) => {
+        const current = registrationCodes.get(input.email);
+        if (current && current.createdAt.getTime() > input.rateLimitBefore.getTime()) return false;
+        registrationCodes.set(input.email, { id: `registration-${++registrationSequence}`, email: input.email, codeHash: input.codeHash, expiresAt: input.expiresAt, usedAt: null, attempts: 0, createdAt: input.createdAt });
+        return true;
+      }),
+      findRegistrationCode: vi.fn(async (email: string) => registrationCodes.get(email) ?? null),
+      incrementRegistrationAttempts: vi.fn(async (id: string, codeHash: string) => { const record = [...registrationCodes.values()].find((candidate) => candidate.id === id && candidate.codeHash === codeHash); if (!record) return 0; record.attempts += 1; return record.attempts; }),
+      markRegistrationCodeUsed: vi.fn(async (id: string, codeHash: string, usedAt: Date) => { const record = [...registrationCodes.values()].find((candidate) => candidate.id === id && candidate.codeHash === codeHash); if (!record || record.usedAt) return false; record.usedAt = usedAt; return true; }),
+      createSession: vi.fn(), findSession: vi.fn(), revokeSession: vi.fn(),
+      createPasswordResetToken: vi.fn(), findPasswordResetToken: vi.fn(), consumePasswordResetToken: vi.fn()
     },
-    usage: { grantCredits: vi.fn(async (_userId: string, count: number) => { credits += count; }) }
+    credits: { grant: vi.fn(async () => { credits += 12; return true; }) }
   };
   return { repositories, mailer, get credits() { return credits; } };
 }

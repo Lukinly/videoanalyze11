@@ -5,7 +5,8 @@ describe("health routes", () => {
     const { buildApp } = await import("../app.js");
     const app = buildApp({
       authService: {
-        register: async () => ({ userId: "u1", verificationSent: true }),
+        sendRegistrationCode: async () => ({ sent: true, expiresInSeconds: 600 }),
+        register: async () => ({ userId: "u1", verified: true }),
         verifyEmail: async () => ({ userId: "u1", trialCreditsGranted: true }),
         login: async () => ({ sessionToken: "token", user: {} }),
         authenticate: async () => ({}),

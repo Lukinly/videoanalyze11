@@ -55,14 +55,45 @@ export function createAuthRepository(pool: Pool) {
       const result = await pool.query(`UPDATE email_verifications SET used_at = $2 WHERE id = $1 AND used_at IS NULL RETURNING id`, [id, usedAt]);
       return (result.rowCount ?? 0) > 0;
     },
-    async createRegistrationCode(input: { email: string; codeHash: string; expiresAt: Date; createdAt: Date }): Promise<void> {
-      await pool.query(
-        `INSERT INTO registration_verifications (id, email, code_hash, expires_at, used_at, attempts, created_at)
-         VALUES ($1, $2, $3, $4, NULL, 0, $5)
-         ON CONFLICT (email) DO UPDATE SET code_hash = EXCLUDED.code_hash,
-           expires_at = EXCLUDED.expires_at, used_at = NULL, attempts = 0, created_at = EXCLUDED.created_at`,
-        [randomUUID(), input.email, input.codeHash, input.expiresAt, input.createdAt]
-      );
+    async createRegistrationCode(input: { email: string; codeHash: string; expiresAt: Date; createdAt: Date; rateLimitBefore: Date }): Promise<boolean> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const current = await client.query<{ createdAt: Date }>(
+          `SELECT created_at AS "createdAt" FROM registration_verifications WHERE email = $1 FOR UPDATE`,
+          [input.email]
+        );
+        if (current.rows[0] && current.rows[0].createdAt.getTime() > input.rateLimitBefore.getTime()) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+
+        const id = randomUUID();
+        if (current.rows[0]) {
+          await client.query(
+            `UPDATE registration_verifications SET id = $2, code_hash = $3, expires_at = $4,
+               used_at = NULL, attempts = 0, created_at = $5 WHERE email = $1`,
+            [input.email, id, input.codeHash, input.expiresAt, input.createdAt]
+          );
+        } else {
+          const inserted = await client.query(
+            `INSERT INTO registration_verifications (id, email, code_hash, expires_at, used_at, attempts, created_at)
+             VALUES ($1, $2, $3, $4, NULL, 0, $5) ON CONFLICT (email) DO NOTHING RETURNING id`,
+            [id, input.email, input.codeHash, input.expiresAt, input.createdAt]
+          );
+          if ((inserted.rowCount ?? 0) === 0) {
+            await client.query("ROLLBACK");
+            return false;
+          }
+        }
+        await client.query("COMMIT");
+        return true;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
     },
     async findRegistrationCode(email: string): Promise<RegistrationCodeRecord | null> {
       const result = await pool.query<RegistrationCodeRecord>(
@@ -73,20 +104,20 @@ export function createAuthRepository(pool: Pool) {
       );
       return result.rows[0] ?? null;
     },
-    async incrementRegistrationAttempts(id: string, now: Date): Promise<number> {
+    async incrementRegistrationAttempts(id: string, codeHash: string, now: Date): Promise<number> {
       void now;
       const result = await pool.query<{ attempts: number }>(
         `UPDATE registration_verifications SET attempts = attempts + 1
-         WHERE id = $1 AND used_at IS NULL RETURNING attempts`,
-        [id]
+         WHERE id = $1 AND code_hash = $2 AND used_at IS NULL RETURNING attempts`,
+        [id, codeHash]
       );
       return result.rows[0]?.attempts ?? 0;
     },
-    async markRegistrationCodeUsed(id: string, usedAt: Date): Promise<boolean> {
+    async markRegistrationCodeUsed(id: string, codeHash: string, usedAt: Date): Promise<boolean> {
       const result = await pool.query(
-        `UPDATE registration_verifications SET used_at = $2
-         WHERE id = $1 AND used_at IS NULL RETURNING id`,
-        [id, usedAt]
+        `UPDATE registration_verifications SET used_at = $3
+         WHERE id = $1 AND code_hash = $2 AND used_at IS NULL RETURNING id`,
+        [id, codeHash, usedAt]
       );
       return (result.rowCount ?? 0) > 0;
     },

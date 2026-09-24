@@ -34,7 +34,27 @@ const migrationStatements = [
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
     stage TEXT NOT NULL DEFAULT 'queued', status TEXT NOT NULL DEFAULT 'queued',
     progress REAL NOT NULL DEFAULT 0, heartbeat_at TIMESTAMPTZ, error TEXT,
+    summary_json JSONB,
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS transcript_segments (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    start_seconds REAL NOT NULL, end_seconds REAL NOT NULL, text TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS chapters (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    title TEXT NOT NULL, start_seconds REAL NOT NULL, end_seconds REAL NOT NULL,
+    summary TEXT NOT NULL, bullets_json JSONB NOT NULL, source_segment_ids_json JSONB NOT NULL,
+    alignment_warning BOOLEAN NOT NULL DEFAULT FALSE
+  )`,
+  `CREATE TABLE IF NOT EXISTS chunks (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL, start_seconds REAL NOT NULL, end_seconds REAL NOT NULL,
+    object_key TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    UNIQUE (run_id, chunk_index)
   )`,
   `CREATE TABLE IF NOT EXISTS usage_ledger (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
