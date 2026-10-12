@@ -2,16 +2,18 @@
 
 本项目的常用开发、测试、部署命令速查。部署细节见 [operations.md](operations.md)。
 
+所有命令从仓库根目录执行，当前统一维护分支为 `main`。历史交接文档中的其他目录不再是开发入口。
+
 ## 环境准备
 
 ```bash
-# 要求：Node.js 22+、pnpm（经 corepack）、FFmpeg/FFprobe
+# 要求：Node.js 24+、pnpm（经 corepack）、FFmpeg/FFprobe
 # 使用仓库锁定的 pnpm 版本
 corepack pnpm install
 
 # 配置环境变量：复制模板并按需替换，不要提交真实 .env
 cp .env.example .env
-# 至少需要设置 GROQ_API_KEY（服务端使用，不会进浏览器包）
+# 设置 GROQ_API_KEY 以及三项 LLM 配置（均只在服务端使用）
 ```
 
 ## 开发模式
@@ -84,7 +86,8 @@ sudo docker compose --env-file .env -f infra/docker-compose.yml run --rm api \
 
 ```bash
 # 启动完整栈（postgres / redis / minio / mailpit / api / worker / web / caddy / migrate）
-sudo docker compose --env-file .env -f infra/docker-compose.yml up -d --build
+sudo docker compose --env-file .env -f infra/docker-compose.yml up -d --build \
+  postgres redis minio minio-init migrate mailpit api worker web proxy
 
 # 查看服务状态
 sudo docker compose --env-file .env -f infra/docker-compose.yml ps
@@ -126,6 +129,8 @@ curl http://localhost/readyz       # 依赖就绪检查（数据库/Redis/对象
 ## 本地端到端上传+分析验证
 
 走真实后端流水线验证一个 MP4 上传到分析完成、原片删除且文字结果仍可读取：
+
+默认视频为仓库内的 `.local/test.mp4`，可通过 `VIDEO_PATH` 指定其他本地文件。
 
 ```bash
 NODE_EXTRA_CA_CERTS="$PWD/.local/videoanalyze-local-root.crt" \
@@ -187,7 +192,7 @@ Redis 默认只在容器网络内暴露，未映射到宿主。
 | 变量 | 说明 |
 | --- | --- |
 | `GROQ_API_KEY` | 分析 worker 的 Groq 密钥，必填 |
-| `llm_api_key` / `llm_api_base_url` / `llm_api_model` | V1 摘要 LLM（Anthropic 兼容端点，如 DeepSeek）；三项齐全才启用摘要，留空则仅做转写（P0）。也接受大写别名 `LLM_API_KEY` / `LLM_API_BASE_URL` / `LLM_API_MODEL` |
+| `llm_api_key` / `llm_api_base_url` / `llm_api_model` | 摘要与 AI 笔记 LLM（Anthropic 兼容端点）；当前流水线要求三项齐全。也接受大写别名 `LLM_API_KEY` / `LLM_API_BASE_URL` / `LLM_API_MODEL` |
 | `LLM_CONTEXT_WINDOW` | 摘要 LLM 上下文窗口，默认 `128000`，决定单窗 vs map-reduce |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | MinIO 凭据 |
 | `PUBLIC_HOST` / `STORAGE_HOST` | 网站与存储域名，见 operations.md 各阶段配置 |
@@ -200,6 +205,6 @@ Redis 默认只在容器网络内暴露，未映射到宿主。
 | `MAX_QUEUED_RUNS_PER_USER` / `MAX_TOTAL_QUEUED_RUNS` | 每用户队列上限 2、全局队列上限 20 |
 | `MAX_QUEUE_WAIT_SECONDS` | 新任务允许的预计最长排队时间，默认 3600 秒 |
 | `ORIGINAL_RETENTION_DAYS` / `RESULT_RETENTION_DAYS` | 兼容配置；终态原片立即清理，标准结果长期保留，隐私结果完成后保留 24 小时 |
-| `TRANSIENT_MEDIA_CAPACITY_BYTES` | 临时媒体容量预算；预计使用量超过 80% 时拒绝新上传，历史结果仍可读取 |
+| `TEMP_MEDIA_CAPACITY_BYTES` | 临时媒体容量预算；预计使用量超过 80% 时拒绝新上传，历史结果仍可读取 |
 | `RETENTION_SWEEP_INTERVAL_SECONDS` | 清理扫描间隔；处理孤立上传、清理重试、陈旧任务和隐私结果到期 |
 | `BACKUP_AGE_RECIPIENT` / `BACKUP_S3_*` | age 加密异地备份；备份排除所有 `ephemeral_*` 表数据 |

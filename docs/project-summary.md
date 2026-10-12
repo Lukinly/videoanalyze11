@@ -1,5 +1,7 @@
 # videoanalyze 项目总结
 
+> 2026-10-12 整合说明：当前项目已统一到仓库根目录的 `main`。本文保留 2026-08-15 的历史架构梳理，功能状态、启动方式及已知问题以 [README](../README.md)、[运行说明](operations.md) 和 [整合记录](consolidation.md) 为准。后续已增加平台链接解析，摘要与 AI 笔记也已成为当前 Worker 的必需阶段。
+
 > 更新日期：2026-08-15 · 分支：`codex/transient-retention-ai-notes`
 > 本文是项目结构与技术链的完整梳理，用于交接、复盘与后续开发索引。
 

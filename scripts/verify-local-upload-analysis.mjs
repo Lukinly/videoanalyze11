@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 
 const baseUrl = process.env.E2E_BASE_URL ?? "https://localhost";
 const mailpitUrl = process.env.MAILPIT_URL ?? "http://localhost:8025";
-const videoPath = process.env.VIDEO_PATH ?? "/mnt/v/Vworkspace/videoanlast/test.mp4";
+const videoPath = process.env.VIDEO_PATH ?? fileURLToPath(new URL("../.local/test.mp4", import.meta.url));
 const pollIntervalMs = Number(process.env.E2E_POLL_INTERVAL_MS ?? 5_000);
 const timeoutMs = Number(process.env.E2E_TIMEOUT_MS ?? 45 * 60 * 1_000);
 
