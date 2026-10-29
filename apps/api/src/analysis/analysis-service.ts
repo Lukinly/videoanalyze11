@@ -14,12 +14,23 @@ type AnalysisRepositories = {
 };
 
 export function createAnalysisService(dependencies: AnalysisRepositories & { queue: { add(name: string, data: unknown, options: { jobId: string }): Promise<unknown> }; admissionLimits?: AdmissionLimits }) {
+  async function enqueue(run: { id: string; status: string }, userId: string, videoId: string) {
+    if (run.status !== "queued") return;
+    try {
+      await dependencies.queue.add("analysis", { userId, videoId, runId: run.id }, { jobId: run.id });
+    } catch {
+      throw new DomainError("QUEUE_UNAVAILABLE", "任务已保存，队列暂时不可用，请稍后重试", 503);
+    }
+  }
   return {
     async start(input: { userId: string; videoId: string; retentionMode?: RetentionMode }) {
       const video = await dependencies.videos.findOwnedById(input.userId, input.videoId);
       if (!video) throw new DomainError("NOT_FOUND", "video not found", 404);
       const active = await dependencies.runs.findActiveOwnedByVideo?.(input.userId, video.id);
-      if (active) return { ...active, billingStatus: "pending_duration_probe" as const, estimatedWaitSeconds: 0 };
+      if (active) {
+        await enqueue(active, input.userId, video.id);
+        return { ...active, billingStatus: "pending_duration_probe" as const, estimatedWaitSeconds: 0 };
+      }
       const retentionMode = input.retentionMode ?? "standard";
       const snapshot = await dependencies.runs.getAdmissionSnapshot?.(input.userId) ?? { userRunning: 0, userQueued: 0, totalQueued: 0, estimatedWaitSeconds: 0 };
       const admission = evaluateAdmission(snapshot, dependencies.admissionLimits);
@@ -27,8 +38,7 @@ export function createAnalysisService(dependencies: AnalysisRepositories & { que
 
       const runId = randomUUID();
       const run = await dependencies.runs.create({ id: runId, userId: input.userId, videoId: video.id, displayName: video.fileName, retentionMode });
-      if (run.id !== runId) return { ...run, billingStatus: "pending_duration_probe" as const, estimatedWaitSeconds: admission.estimatedWaitSeconds };
-      await dependencies.queue.add("analysis", { userId: input.userId, videoId: video.id, runId }, { jobId: runId });
+      await enqueue(run, input.userId, video.id);
       return { ...run, billingStatus: "pending_duration_probe" as const, estimatedWaitSeconds: admission.estimatedWaitSeconds };
     },
     async get(input: { userId: string; runId: string }): Promise<{ id: string }> {

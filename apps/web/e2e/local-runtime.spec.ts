@@ -1,0 +1,43 @@
+import { expect, test } from "@playwright/test";
+import { resolve } from "node:path";
+
+test("registers, logs in, uploads a video, and receives persisted SSE progress", async ({ page, request }) => {
+  test.skip(process.env.E2E_RUNTIME !== "1", "Requires pnpm local:dev and a short local fixture");
+  const email = `browser-${Date.now()}@example.test`;
+  const password = `Runtime-${Date.now()}!`;
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.getByRole("button", { name: "注册新账号" }).click();
+  await page.locator("#register-email").fill(email);
+  await page.getByRole("button", { name: "获取验证码" }).click();
+  await expect(page.getByText("验证码已发送，请检查邮箱。")).toBeVisible();
+  const listing = await (await request.get("http://127.0.0.1:8025/api/v1/messages?limit=50")).json();
+  const mail = listing.messages.find((message: unknown) => JSON.stringify(message).includes(email));
+  expect(mail).toBeTruthy();
+  const detail = await (await request.get(`http://127.0.0.1:8025/api/v1/message/${mail.ID}`)).json();
+  const code = detail.Text.match(/\d{6}/)?.[0];
+  expect(code).toBeTruthy();
+  await page.getByLabel("验证码", { exact: true }).fill(code);
+  await page.getByLabel("密码", { exact: true }).fill(password);
+  await page.getByLabel("确认密码", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "创建账号", exact: true }).click();
+  await expect(page.getByText("注册成功，请返回登录。")).toBeVisible();
+  await page.getByRole("button", { name: "返回登录", exact: true }).click();
+  await page.getByLabel("邮箱", { exact: true }).fill(email);
+  await page.getByLabel("密码", { exact: true }).fill(password);
+  await page.getByRole("dialog").getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page.getByText("12 积分可用")).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles(resolve(process.env.VIDEO_PATH ?? ".local/smoke.mp4"));
+  await page.getByRole("button", { name: "上传并分析", exact: true }).click();
+  await expect(page.locator(".connection-state")).toHaveText("实时连接已连接");
+  const runs = await (await page.request.get("/api/analysis-runs")).json();
+  const run = runs.items[0];
+  expect(run).toBeTruthy();
+  // Avoid consuming external AI quota when a worker starts after this smoke test.
+  await page.getByRole("button", { name: "取消任务", exact: true }).click();
+  await expect(page.getByText("取消中", { exact: true })).toBeVisible();
+  await page.screenshot({ path: resolve(".local/screenshots/runtime-upload.png"), fullPage: true });
+  expect(errors).toEqual([]);
+});

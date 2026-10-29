@@ -26,6 +26,7 @@ export type DomainErrorCode =
   | "USER_QUEUE_LIMIT"
   | "GLOBAL_QUEUE_LIMIT"
   | "QUEUE_WAIT_LIMIT"
+  | "QUEUE_UNAVAILABLE"
   | "RESULT_EXPIRED"
   | "ORIGINAL_DELETED";
 

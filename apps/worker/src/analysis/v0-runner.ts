@@ -60,6 +60,7 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
         await dependencies.state.saveChunkTranscript(input.runId, chunk.index, result.segments);
         await dependencies.state.markChunkCompleted(input.runId, chunk.index);
         completedTranscripts.push({ start: chunk.start, end: chunk.end, segments: result.segments });
+        await requireStageUpdate(() => dependencies.state.setStage(input.runId, "transcribing", 0.2 + 0.7 * completedTranscripts.length / chunks.length));
       }
 
       const merged = mergeChunkTranscripts({ videoDuration: run.duration, chunks: completedTranscripts });

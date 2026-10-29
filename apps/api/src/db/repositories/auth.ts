@@ -139,8 +139,55 @@ export function createAuthRepository(pool: Pool) {
     async revokeSession(tokenHash: string, revokedAt: Date): Promise<void> {
       await pool.query(`UPDATE sessions SET revoked_at = $2 WHERE token_hash = $1 AND revoked_at IS NULL`, [tokenHash, revokedAt]);
     },
-    async createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: Date }): Promise<void> {
-      await pool.query("INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)", [randomUUID(), input.userId, input.tokenHash, input.expiresAt, new Date()]);
+    async createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: Date; createdAt?: Date; rateLimitBefore?: Date }): Promise<boolean> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [input.userId]);
+        if (input.rateLimitBefore) {
+          const recent = await client.query("SELECT id FROM password_reset_tokens WHERE user_id = $1 AND created_at > $2 LIMIT 1", [input.userId, input.rateLimitBefore]);
+          if (recent.rowCount) {
+            await client.query("ROLLBACK");
+            return false;
+          }
+        }
+        await client.query("INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at) VALUES ($1, $2, $3, $4, $5)", [randomUUID(), input.userId, input.tokenHash, input.expiresAt, input.createdAt ?? new Date()]);
+        await client.query("COMMIT");
+        return true;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async completePasswordReset(input: { tokenHash: string; passwordHash: string; now: Date }): Promise<boolean> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const token = await client.query<{ id: string; userId: string }>('SELECT id, user_id AS "userId" FROM password_reset_tokens WHERE token_hash = $1', [input.tokenHash]);
+        const reset = token.rows[0];
+        if (!reset) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+        await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [reset.userId]);
+        const consumed = await client.query("UPDATE password_reset_tokens SET used_at = $2 WHERE id = $1 AND used_at IS NULL AND expires_at > $2 RETURNING id", [reset.id, input.now]);
+        if (!consumed.rowCount) {
+          await client.query("ROLLBACK");
+          return false;
+        }
+        await client.query("UPDATE users SET password_hash = $2, must_change_password = FALSE, updated_at = $3 WHERE id = $1", [reset.userId, input.passwordHash, input.now]);
+        await client.query("UPDATE password_reset_tokens SET used_at = $2 WHERE user_id = $1 AND used_at IS NULL", [reset.userId, input.now]);
+        await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL", [reset.userId, input.now]);
+        await client.query("COMMIT");
+        return true;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
     },
     async findPasswordResetToken(tokenHash: string): Promise<PasswordResetRecord | null> {
       const result = await pool.query<PasswordResetRecord>("SELECT id, user_id AS \"userId\", token_hash AS \"tokenHash\", expires_at AS \"expiresAt\", used_at AS \"usedAt\" FROM password_reset_tokens WHERE token_hash = $1", [tokenHash]);

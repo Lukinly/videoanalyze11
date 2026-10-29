@@ -8,6 +8,7 @@ describe("auth routes", () => {
     login: vi.fn().mockResolvedValue({ sessionToken: "session-token", user: { id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() } }),
     authenticate: vi.fn().mockResolvedValue({ id: "user_1", email: "user@example.com", emailVerifiedAt: new Date().toISOString() }),
     logout: vi.fn().mockResolvedValue(undefined),
+    forgotPassword: vi.fn().mockResolvedValue({ ok: true }),
     resetPassword: vi.fn().mockResolvedValue({ ok: true }),
     changePassword: vi.fn().mockResolvedValue({ ok: true })
   };
@@ -72,5 +73,22 @@ describe("auth routes", () => {
     });
     expect(authenticated.statusCode).toBe(200);
     expect(authService.authenticate).toHaveBeenCalledWith("session-token");
+  });
+
+  it("accepts a public reset request and returns only an acknowledgement", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/auth/forgot-password", payload: { email: "user@example.com" } });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(authService.forgotPassword).toHaveBeenCalledWith({ email: "user@example.com" });
+    for (const payload of [{}, { email: 123 }, null]) {
+      const invalid = await app.inject({ method: "POST", url: "/api/auth/forgot-password", payload });
+      expect(invalid.statusCode).toBe(400);
+    }
+  });
+
+  it("clears the session cookie after resetting a password", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/auth/password-reset", payload: { token: "reset-token", password: "new secure password", confirmPassword: "new secure password" } });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["set-cookie"]).toEqual(expect.stringContaining("video_session=;"));
   });
 });

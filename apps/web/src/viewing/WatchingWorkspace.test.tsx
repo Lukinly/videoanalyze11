@@ -54,8 +54,8 @@ describe("WatchingWorkspace", () => {
     const remoteVideo: UploadedVideo = {
       ...video,
       playbackUrl: "",
-      sourcePlatform: "youtube",
-      sourceUrl: "https://www.youtube.com/watch?v=remote123"
+      sourcePlatform: "bilibili",
+      sourceUrl: "https://www.bilibili.com/video/BV1AB411c7mD?p=2"
     };
 
     render(<WatchingWorkspace user={user} credits={credits} video={remoteVideo} run={completedRun} playerRef={createRef<PlayerController>()} onCompleted={vi.fn()} onLogout={vi.fn()} onAttach={vi.fn()} onDeleted={vi.fn()} />);
@@ -64,5 +64,7 @@ describe("WatchingWorkspace", () => {
     expect(screen.queryByLabelText("重新选择本地原视频")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出 Markdown" })).toBeVisible();
     expect(screen.getByRole("button", { name: "永久删除结果" })).toBeVisible();
+    expect(screen.getByTitle("demo.mp4（B站官方播放器）")).toHaveAttribute("src", expect.stringContaining("p=2"));
+    expect(screen.getByRole("link", { name: /打开原视频/ })).toBeVisible();
   });
 });

@@ -1,5 +1,14 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  server: { port: 5173 }
+  server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
+    proxy: {
+      "/api": { target: "http://127.0.0.1:3000", changeOrigin: true },
+      "/healthz": "http://127.0.0.1:3000",
+      "/readyz": "http://127.0.0.1:3000"
+    }
+  }
 });

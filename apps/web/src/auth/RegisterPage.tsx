@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api } from "../api/client";
-import { Brand } from "../brand/Brand";
+import { AuthCard } from "./AuthCard";
 
-export function RegisterPage({ onLogin }: { onLogin: () => void }) {
+export function RegisterPage({ onLogin, embedded = false }: { onLogin: () => void; embedded?: boolean }) {
   const [email, setEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [password, setPassword] = useState("");
@@ -59,8 +59,7 @@ export function RegisterPage({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <main className="auth-shell"><Brand /><section className="auth-card">
-      <p className="eyebrow">Start with 12 credits</p><h1>创建账号</h1>
+    <AuthCard eyebrow="Start with 12 credits" title="创建账号" embedded={embedded}>
       {message ? <div className="success-box"><p>{message}</p><button className="primary-button" type="button" onClick={onLogin}>返回登录</button></div> : <form className="stack-form" onSubmit={submit}>
         <label htmlFor="register-email">邮箱<div className="verification-row"><input ref={emailInputRef} id="register-email" required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /><button className="secondary-button" disabled={codeBusy || cooldownSeconds > 0} type="button" onClick={() => { void requestCode(); }}>{codeBusy ? "发送中…" : cooldownSeconds > 0 ? `${cooldownSeconds} 秒后重试` : "获取验证码"}</button></div></label>
         <label htmlFor="register-code">验证码<input id="register-code" aria-label="验证码" required minLength={6} pattern="[0-9]{6}" inputMode="numeric" maxLength={6} autoComplete="one-time-code" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} />{codeMessage && <small>{codeMessage}</small>}</label>
@@ -70,6 +69,6 @@ export function RegisterPage({ onLogin }: { onLogin: () => void }) {
         <button className="primary-button" disabled={busy} type="submit">{busy ? "创建中…" : "创建账号"}</button>
       </form>}
       {!message && <p className="form-footnote">已有账号？ <button className="text-button" type="button" onClick={onLogin}>返回登录</button></p>}
-    </section></main>
+    </AuthCard>
   );
 }

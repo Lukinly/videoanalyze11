@@ -26,6 +26,10 @@ describe("linux ffmpeg media fixture", () => {
       expect(metadata.videoCodec).toBe("h264");
       expect(metadata.audioTracks).toHaveLength(1);
       expect((await stat(audio)).size).toBeGreaterThan(0);
+      const framePath = join(directory, "note.jpg");
+      const dataUrl = await processor.captureFrame({ path: input }, framePath, 0.5);
+      expect(dataUrl).toMatch(/^data:image\/jpeg;base64,\/9j\//);
+      await expect(stat(framePath)).rejects.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

@@ -18,17 +18,15 @@ cp .env.example .env
 
 ## 开发模式
 
+原生本地运行（首次按 [本地运行与验证](local-development.md) 安装基础工具并使用 `.env.local.example` 配置）：
+
 ```bash
-# 同时启动 api / worker / web 三个子包的 dev 进程
-corepack pnpm dev
+corepack pnpm local:dev
 ```
 
-注意：`apps/api` 与 `apps/worker` 的 dev 脚本是 `node --watch dist/*.js`，
-直接跑 `dev` 前需要先构建过（见下方 `build`）。前端 `apps/web` 走 Vite，
-监听 http://localhost:5173。
+自动启动 PostgreSQL、Redis、S3 开发存储、Mailpit、API、Worker 和 Vite；修改源码自动编译重启。访问 http://localhost:5173；Ctrl+C 停止并保留 `.local/` 数据。
 
-本地最常见的完整跑法仍是起整套 Docker 栈（见「Docker Compose」小节），
-再通过 https://localhost 访问。
+已有基础服务时配置 `.env` 后运行 `corepack pnpm build && corepack pnpm db:migrate && corepack pnpm dev`。`dev` 自动加载根目录 `.env`，Worker 入口为 `worker-main.js`。生产环境继续使用下方 Docker Compose。
 
 ## 校验与构建
 
@@ -44,6 +42,8 @@ corepack pnpm build              # 按依赖顺序构建全部 workspace 包
 corepack pnpm test               # 全部单测（vitest run，覆盖 apps/* 与 packages/*）
 corepack pnpm test:v0            # 同上，v0 验证入口的别名
 corepack pnpm test:acceptance    # 仅跑 tests/acceptance 下的验收测试
+corepack pnpm test:postgres      # 正式 SQL 迁移 + PostgreSQL/FFmpeg 集成，需运行中的数据库
+corepack pnpm test:e2e           # Playwright 浏览器验证
 ```
 
 运行单个子包的测试：
@@ -192,7 +192,8 @@ Redis 默认只在容器网络内暴露，未映射到宿主。
 | 变量 | 说明 |
 | --- | --- |
 | `GROQ_API_KEY` | 分析 worker 的 Groq 密钥，必填 |
-| `llm_api_key` / `llm_api_base_url` / `llm_api_model` | 摘要与 AI 笔记 LLM（Anthropic 兼容端点）；当前流水线要求三项齐全。也接受大写别名 `LLM_API_KEY` / `LLM_API_BASE_URL` / `LLM_API_MODEL` |
+| `llm_api_key` / `llm_api_base_url` / `llm_api_model` | 摘要与 AI 笔记 LLM（Anthropic 或 OpenAI 兼容端点）；当前流水线要求三项齐全。也接受大写别名 `LLM_API_KEY` / `LLM_API_BASE_URL` / `LLM_API_MODEL` |
+| `LLM_API_PROTOCOL` | `auto`（默认）、`anthropic`、`openai`；DashScope 自动选择 OpenAI 兼容协议 |
 | `LLM_CONTEXT_WINDOW` | 摘要 LLM 上下文窗口，默认 `128000`，决定单窗 vs map-reduce |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | MinIO 凭据 |
 | `PUBLIC_HOST` / `STORAGE_HOST` | 网站与存储域名，见 operations.md 各阶段配置 |

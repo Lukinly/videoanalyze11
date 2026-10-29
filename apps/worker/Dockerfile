@@ -36,7 +36,7 @@ RUN sed -i \
 COPY --from=build /workspace/deploy ./
 COPY --from=build /workspace/apps/worker/dist ./dist
 COPY --from=build /workspace/apps/worker/package.json ./package.json
-COPY apps/worker/scripts/bilibili-part.py /app/bilibili-part.py
+COPY apps/worker/scripts/bilibili-part.py /app/scripts/bilibili-part.py
 COPY apps/worker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 USER node

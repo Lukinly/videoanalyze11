@@ -107,6 +107,9 @@ describe("result store", () => {
 
     expect(await count("ai_notes", runId)).toBe(mode === "standard" ? 1 : 0);
     expect(await count("ephemeral_ai_notes", runId)).toBe(mode === "privacy" ? 1 : 0);
+    const table = mode === "standard" ? "ai_notes" : "ephemeral_ai_notes";
+    const stored = await pool.query<{ notes: unknown }>(`SELECT notes_json AS notes FROM ${table} WHERE run_id = $1`, [runId]);
+    expect(stored.rows[0].notes).toEqual(notes);
   });
 
   it("sets one exact privacy expiry on the run and every ephemeral result row", async () => {
@@ -115,11 +118,12 @@ describe("result store", () => {
     const store = createResultStore(pool);
     await store.saveTranscript({ runId: "privacy_run", userId: "user_1", mode: "privacy", expiresAt: null, segments });
     await store.saveSummary({ runId: "privacy_run", userId: "user_1", mode: "privacy", expiresAt: null, result: summary });
+    await store.saveNotes({ runId: "privacy_run", userId: "user_1", mode: "privacy", expiresAt: null, notes });
     const expiresAt = new Date("2026-08-16T03:04:05.678Z");
 
     await store.finalizePrivacyExpiry("privacy_run", expiresAt);
 
-    for (const table of ["analysis_runs", "ephemeral_transcript_segments", "ephemeral_run_summaries", "ephemeral_chapters"]) {
+    for (const table of ["analysis_runs", "ephemeral_transcript_segments", "ephemeral_run_summaries", "ephemeral_chapters", "ephemeral_ai_notes"]) {
       const column = table === "analysis_runs" ? "result_expires_at" : "expires_at";
       const rows = await pool.query<{ expiresAt: Date }>(`SELECT ${column} AS "expiresAt" FROM ${table} WHERE ${table === "analysis_runs" ? "id" : "run_id"} = $1`, ["privacy_run"]);
       expect(rows.rows.length).toBeGreaterThan(0);
@@ -228,7 +232,7 @@ const summary: AlignedSummaryResult = {
 
 const notes = {
   title: "Detailed notes", topic: "Topic", coreIdeas: ["Idea"], reviewPoints: ["Review"],
-  sections: [{ id: "s1", level: 1 as const, title: "Section", body: "Body", citations: [{ segmentId: "privacy_run_seg_1", timestampSeconds: 0 }] }]
+  sections: [{ id: "s1", level: 1 as const, title: "Section", body: "Body", citations: [{ segmentId: "privacy_run_seg_1", timestampSeconds: 0 }], frame: { timestampSeconds: 0, dataUrl: "data:image/jpeg;base64,/9j/2Q==" } }]
 };
 
 async function createRun(runId: string, mode: "standard" | "privacy") {

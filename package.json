@@ -7,31 +7,40 @@
     "test:v0": "corepack pnpm test",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "dev": "corepack pnpm --parallel --filter @videoanalyze/api --filter @videoanalyze/worker --filter @videoanalyze/web dev",
+    "dev": "corepack pnpm build && node scripts/dev.mjs",
     "build": "corepack pnpm -r build",
     "test:acceptance": "vitest run tests/acceptance",
     "verify:local-upload-analysis": "node scripts/verify-local-upload-analysis.mjs",
-    "admin:create": "corepack pnpm --filter @videoanalyze/api admin:create"
+    "admin:create": "corepack pnpm --filter @videoanalyze/api admin:create",
+    "db:migrate": "node --env-file-if-exists=.env apps/api/dist/db/migrate.js",
+    "local:dev": "node --env-file-if-exists=.env scripts/local-dev.mjs",
+    "test:postgres": "node --env-file-if-exists=.env scripts/test-postgres.mjs",
+    "test:e2e": "playwright test --config apps/web/playwright.config.ts"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@playwright/test": "^1.55.0",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
-    "@eslint/js": "^9.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.0.0",
-    "eslint": "^9.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.30.0",
+    "eslint": "^9.0.0",
     "jsdom": "^26.1.0",
+    "pg": "^8.22.0",
     "pg-mem": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "s3rver": "^3.7.1",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0",
     "vite": "^7.0.0",
     "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

@@ -9,7 +9,7 @@ const pool = new Pool();
 
 describe("authentication service", () => {
   let repositories: Awaited<ReturnType<typeof createRepositories>>;
-  let mailer: { sendVerification: ReturnType<typeof vi.fn>; sendRegistrationCode: ReturnType<typeof vi.fn> };
+  let mailer: { sendVerification: ReturnType<typeof vi.fn>; sendRegistrationCode: ReturnType<typeof vi.fn>; sendPasswordReset: ReturnType<typeof vi.fn> };
   let auth: ReturnType<typeof createAuthService>;
 
   beforeAll(async () => {
@@ -20,12 +20,13 @@ describe("authentication service", () => {
   });
 
   beforeEach(async () => {
+    await pool.query("DELETE FROM password_reset_tokens");
     await pool.query("DELETE FROM email_verifications");
     await pool.query("DELETE FROM registration_verifications");
     await pool.query("DELETE FROM sessions");
     await pool.query("DELETE FROM usage_ledger");
     await pool.query("DELETE FROM users");
-    mailer = { sendVerification: vi.fn(), sendRegistrationCode: vi.fn() };
+    mailer = { sendVerification: vi.fn(), sendRegistrationCode: vi.fn(), sendPasswordReset: vi.fn() };
     auth = createAuthService({ repositories, mailer, verificationBaseUrl: "http://localhost:5173" });
   });
 
@@ -162,6 +163,51 @@ describe("authentication service", () => {
     await expect(auth.resetPassword({ token: reset.token, password: "new secure password", confirmPassword: "new secure password" })).resolves.toEqual({ ok: true });
     await expect(auth.resetPassword({ token: reset.token, password: "another password", confirmPassword: "another password" })).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
     await expect(auth.login({ email: "reset@example.com", password: "new secure password" })).resolves.toMatchObject({ user: { id: registered.userId } });
+  });
+
+  it("sends a normalized email a reset link, throttles repeat sends, and revokes old sessions and tokens after reset", async () => {
+    const clock = new Date("2026-10-25T00:00:00Z");
+    auth = createAuthService({ repositories, mailer, verificationBaseUrl: "http://localhost:5173", now: () => clock });
+    const user = await repositories.users.create({ email: "recovery@example.com", passwordHash: await hashPassword("original password"), emailVerifiedAt: clock });
+    const session = await auth.login({ email: user.email, password: "original password" });
+    await expect(auth.forgotPassword({ email: " Recovery@Example.com " })).resolves.toEqual({ ok: true });
+    const first = mailer.sendPasswordReset.mock.calls[0][0];
+    expect(first.link).toBe(`http://localhost:5173/reset-password?token=${first.token}`);
+    await expect(auth.forgotPassword({ email: user.email })).resolves.toEqual({ ok: true });
+    expect(mailer.sendPasswordReset).toHaveBeenCalledTimes(1);
+    clock.setTime(clock.getTime() + 60_000);
+    await auth.forgotPassword({ email: user.email });
+    expect(mailer.sendPasswordReset).toHaveBeenCalledTimes(2);
+    const second = mailer.sendPasswordReset.mock.calls[1][0];
+    await expect(auth.resetPassword({ token: second.token, password: "new secure password", confirmPassword: "different password" })).rejects.toMatchObject({ code: "PASSWORD_MISMATCH" });
+    await auth.resetPassword({ token: second.token, password: "new secure password", confirmPassword: "new secure password" });
+    await expect(auth.authenticate(session.sessionToken)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(auth.login({ email: user.email, password: "original password" })).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+    await expect(auth.login({ email: user.email, password: "new secure password" })).resolves.toMatchObject({ user: { id: user.id } });
+    await expect(auth.resetPassword({ token: first.token, password: "another password", confirmPassword: "another password" })).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
+  });
+
+  it("returns the same acknowledgement without emailing unknown, unverified, or suspended accounts", async () => {
+    await repositories.users.create({ email: "unverified@example.com", passwordHash: "hash" });
+    const user = await repositories.users.create({ email: "disabled@example.com", passwordHash: "hash", emailVerifiedAt: new Date() });
+    await repositories.users.setStatus(user.id, "suspended");
+    for (const email of ["unknown@example.com", "unverified@example.com", "disabled@example.com"]) {
+      await expect(auth.forgotPassword({ email })).resolves.toEqual({ ok: true });
+    }
+    expect(mailer.sendPasswordReset).not.toHaveBeenCalled();
+    await expect(auth.forgotPassword({ email: "invalid" })).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+  });
+
+  it("rejects expired and unknown reset links without changing the password", async () => {
+    const clock = new Date("2026-10-25T00:00:00Z");
+    auth = createAuthService({ repositories, mailer, verificationBaseUrl: "http://localhost:5173", now: () => clock });
+    const user = await repositories.users.create({ email: "expired-reset@example.com", passwordHash: await hashPassword("original password"), emailVerifiedAt: clock });
+    await auth.forgotPassword({ email: user.email });
+    clock.setTime(clock.getTime() + 60 * 60_000);
+    for (const token of [mailer.sendPasswordReset.mock.calls[0][0].token, "unknown-token"]) {
+      await expect(auth.resetPassword({ token, password: "new secure password", confirmPassword: "new secure password" })).rejects.toMatchObject({ code: "INVALID_RESET_TOKEN" });
+    }
+    await expect(auth.login({ email: user.email, password: "original password" })).resolves.toMatchObject({ user: { id: user.id } });
   });
 });
 

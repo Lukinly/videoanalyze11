@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch dist/worker.js",
+    "dev": "node --env-file-if-exists=../../.env --watch dist/worker-main.js",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run src"
   },

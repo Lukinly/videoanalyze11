@@ -33,9 +33,10 @@ type AuthDependencies = {
       createSession(input: { userId: string; tokenHash: string; expiresAt: Date }): Promise<void>;
       findSession(tokenHash: string): Promise<{ userId: string; expiresAt: Date; revokedAt: Date | null } | null>;
       revokeSession(tokenHash: string, revokedAt: Date): Promise<void>;
-      createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: Date }): Promise<void>;
+      createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: Date; createdAt?: Date; rateLimitBefore?: Date }): Promise<boolean>;
       findPasswordResetToken(tokenHash: string): Promise<{ id: string; userId: string; expiresAt: Date; usedAt: Date | null } | null>;
       consumePasswordResetToken(id: string, usedAt: Date): Promise<boolean>;
+      completePasswordReset(input: { tokenHash: string; passwordHash: string; now: Date }): Promise<boolean>;
     };
     credits: {
       grant(input: { userId: string; amount: number; type: "welcome_grant"; idempotencyKey: string; reason: string }): Promise<boolean | void>;
@@ -81,6 +82,19 @@ function normalizeEmail(value: string): string {
 
 export function createAuthService(dependencies: AuthDependencies) {
   const now = dependencies.now ?? (() => new Date());
+
+  async function sendPasswordReset(user: UserWithCredentials, rateLimit = false) {
+    if (!dependencies.mailer.sendPasswordReset) throw new Error("password reset email is unavailable");
+    const token = createOpaqueToken();
+    const currentTime = now();
+    const expiresAt = new Date(currentTime.getTime() + 60 * 60 * 1000);
+    const created = await dependencies.repositories.auth.createPasswordResetToken({
+      userId: user.id, tokenHash: hashOpaqueToken(token), expiresAt, createdAt: currentTime,
+      ...(rateLimit ? { rateLimitBefore: new Date(currentTime.getTime() - 60_000) } : {})
+    });
+    if (created) await dependencies.mailer.sendPasswordReset({ email: user.email, token, link: `${dependencies.resetBaseUrl ?? dependencies.verificationBaseUrl}/reset-password?token=${encodeURIComponent(token)}` });
+    return { token, expiresAt };
+  }
 
   return {
     async sendRegistrationCode(input: { email: string }) {
@@ -207,23 +221,22 @@ export function createAuthService(dependencies: AuthDependencies) {
     async requestPasswordReset(userId: string) {
       const user = await dependencies.repositories.users.findById(userId);
       if (!user) throw new DomainError("NOT_FOUND", "user not found", 404);
-      const token = createOpaqueToken();
-      const expiresAt = new Date(now().getTime() + 60 * 60 * 1000);
-      await dependencies.repositories.auth.createPasswordResetToken({ userId, tokenHash: hashOpaqueToken(token), expiresAt });
-      await dependencies.mailer.sendPasswordReset?.({ email: user.email, token, link: `${dependencies.resetBaseUrl ?? dependencies.verificationBaseUrl}/reset-password?token=${encodeURIComponent(token)}` });
-      return { token, expiresAt };
+      return sendPasswordReset(user);
+    },
+
+    async forgotPassword(input: { email: string }) {
+      const user = await dependencies.repositories.users.findByEmail(normalizeEmail(input.email));
+      if (user?.emailVerifiedAt && user.status === "active") await sendPasswordReset(user, true);
+      // Keep the response identical for unknown accounts and repeated requests.
+      return { ok: true as const };
     },
 
     async resetPassword(input: { token: string; password: string; confirmPassword: string }) {
       validatePasswordPair(input.password, input.confirmPassword);
-      const reset = await dependencies.repositories.auth.findPasswordResetToken(hashOpaqueToken(input.token));
-      if (!reset || reset.usedAt || reset.expiresAt.getTime() <= now().getTime()) {
+      const passwordHash = await hashPassword(input.password);
+      if (!(await dependencies.repositories.auth.completePasswordReset({ tokenHash: hashOpaqueToken(input.token), passwordHash, now: now() }))) {
         throw new DomainError("INVALID_RESET_TOKEN", "password reset token is invalid or expired", 400);
       }
-      if (!(await dependencies.repositories.auth.consumePasswordResetToken(reset.id, now()))) {
-        throw new DomainError("INVALID_RESET_TOKEN", "password reset token is invalid or expired", 400);
-      }
-      await dependencies.repositories.users.updatePassword(reset.userId, await hashPassword(input.password));
       return { ok: true as const };
     },
 

@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { lookup as dnsLookup } from "node:dns";
+import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -29,15 +30,17 @@ export function extractSessionCookie(setCookieHeader) {
   return `video_session=${match[1]}`;
 }
 
-export function validatePresignedUploadUrl(value) {
+export function validatePresignedUploadUrl(value, expectedOrigin = "https://storage.localhost") {
   let url;
   try {
     url = new URL(value);
   } catch {
     throw new Error("upload URL is not a valid URL");
   }
-  if (url.protocol !== "https:") throw new Error("upload URL must use HTTPS");
-  if (url.hostname !== "storage.localhost") throw new Error("upload URL must use storage.localhost");
+  const expected = new URL(expectedOrigin);
+  if (expected.protocol !== "https:" && !(expected.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(expected.hostname))) throw new Error("upload URL must use HTTPS outside loopback development");
+  if (url.protocol !== expected.protocol) throw new Error("upload URL must use HTTPS or the explicit loopback origin");
+  if (url.origin !== expected.origin) throw new Error(`upload URL must use ${expected.host}`);
   for (const key of url.searchParams.keys()) {
     const normalized = key.toLowerCase();
     if (normalized === "x-amz-sdk-checksum-algorithm" || normalized === "x-amz-checksum-crc32") {
@@ -170,7 +173,7 @@ async function uploadVideo(cookie) {
     method: "POST",
     body: JSON.stringify({ fileName: videoPath.split("/").at(-1), contentType: "video/mp4", contentLength: file.size })
   }, 201, cookie);
-  const uploadUrl = validatePresignedUploadUrl(session.body.uploadUrl);
+  const uploadUrl = validatePresignedUploadUrl(session.body.uploadUrl, process.env.E2E_STORAGE_ORIGIN);
 
   const uploadResponse = await putPresignedVideo(uploadUrl, file.size);
   assertStatus(uploadResponse.status, uploadResponse.body, [200, 201, 204]);
@@ -190,7 +193,7 @@ function putPresignedVideo(uploadUrl, contentLength) {
       reject(error);
     };
 
-    request = httpsRequest({
+    request = (uploadUrl.protocol === "https:" ? httpsRequest : httpRequest)({
       protocol: uploadUrl.protocol,
       hostname: uploadUrl.hostname,
       port: uploadUrl.port || undefined,
@@ -250,7 +253,7 @@ export function readUploadResponse(response) {
 }
 
 async function runAnalysis(cookie, videoId) {
-  const started = await requestJson(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST" }, 202, cookie);
+  const started = await requestJson(`/api/videos/${encodeURIComponent(videoId)}/analysis-runs`, { method: "POST", body: JSON.stringify({ retentionMode: process.env.E2E_RETENTION_MODE ?? "standard" }) }, 202, cookie);
   const runId = started.body.id;
   if (typeof runId !== "string" || !/^[0-9a-f-]{36}$/i.test(runId)) throw new Error("analysis response did not include a valid run id");
   const deadline = Date.now() + timeoutMs;
@@ -298,10 +301,18 @@ function sleep(milliseconds) {
 }
 
 async function main() {
-  if (!baseUrl.startsWith("https://")) throw new Error("E2E_BASE_URL must use https:// for the local verifier");
-  if (!process.env.NODE_EXTRA_CA_CERTS) throw new Error("NODE_EXTRA_CA_CERTS must point to .local/videoanalyze-local-root.crt");
+  const origin = new URL(baseUrl);
+  if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) throw new Error("E2E_BASE_URL must use HTTPS outside loopback development");
+  if (origin.protocol === "https:" && !process.env.NODE_EXTRA_CA_CERTS) throw new Error("NODE_EXTRA_CA_CERTS must point to .local/videoanalyze-local-root.crt");
   const cookie = await authenticate();
   const session = await uploadVideo(cookie);
+  if (process.env.E2E_SMOKE_ONLY === "1") {
+    await requestJson(`/api/videos/${encodeURIComponent(session.videoId)}/playback-url`, {}, 200, cookie);
+    const balance = await requestJson("/api/credits", {}, 200, cookie);
+    await requestJson(`/api/videos/${encodeURIComponent(session.videoId)}`, { method: "DELETE" }, 204, cookie);
+    console.log(JSON.stringify({ registeredAndAuthenticated: true, uploadAndPlayback: true, deleted: true, availableCredits: balance.body.available }));
+    return;
+  }
   const terminal = await runAnalysis(cookie, session.videoId);
   const report = await waitForTerminalLifecycle(cookie, session.videoId, terminal);
   console.log(JSON.stringify(report));

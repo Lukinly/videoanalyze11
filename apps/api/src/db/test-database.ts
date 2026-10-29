@@ -91,7 +91,7 @@ const migrationStatements = [
   `CREATE TABLE IF NOT EXISTS ephemeral_ai_notes (
     run_id TEXT PRIMARY KEY REFERENCES analysis_runs(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    notes_json JSONB NOT NULL, expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL
+    notes_json JSONB NOT NULL, expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS chunks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /workspace
 RUN corepack enable
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
@@ -20,7 +20,7 @@ RUN pnpm --config.inject-workspace-packages=true --ignore-scripts --filter @vide
 RUN pnpm --config.inject-workspace-packages=true --ignore-scripts --filter @videoanalyze/domain deploy --prod /workspace/domain-deploy
 RUN node scripts/materialize-workspace-package.mjs /workspace/deploy @videoanalyze/domain /workspace/domain-deploy
 
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 WORKDIR /app
 ARG APT_MIRROR=mirrors.aliyun.com
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/

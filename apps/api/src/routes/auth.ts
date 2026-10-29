@@ -8,6 +8,7 @@ export type AuthServiceContract = {
   login(input: { email: string; password: string }): Promise<{ sessionToken: string; user: unknown }>;
   authenticate(sessionToken: string): Promise<unknown>;
   logout(sessionToken: string): Promise<void>;
+  forgotPassword?(input: { email: string }): Promise<{ ok: true }>;
   resetPassword?(input: { token: string; password: string; confirmPassword: string }): Promise<{ ok: true }>;
   changePassword?(input: { userId: string; password: string; confirmPassword: string }): Promise<{ ok: true }>;
 };
@@ -57,10 +58,18 @@ export async function registerAuthRoutes(app: FastifyInstance, authService: Auth
     return reply.code(204).send();
   });
 
+  app.post<{ Body: { email: string } }>("/api/auth/forgot-password", async (request, reply) => {
+    if (!authService.forgotPassword) return reply.code(501).send({ code: "NOT_IMPLEMENTED", message: "password reset unavailable" });
+    if (!request.body || typeof request.body.email !== "string") throw new DomainError("INVALID_CREDENTIALS", "email is required", 400);
+    return reply.code(202).send(await authService.forgotPassword({ email: request.body.email }));
+  });
+
   app.post<{ Body: { token: string; password: string; confirmPassword: string } }>("/api/auth/password-reset", async (request, reply) => {
     if (!authService.resetPassword) return reply.code(501).send({ code: "NOT_IMPLEMENTED", message: "password reset unavailable" });
     if (!request.body || typeof request.body.token !== "string" || typeof request.body.password !== "string" || typeof request.body.confirmPassword !== "string") throw new DomainError("INVALID_RESET_TOKEN", "token, password and confirmation are required", 400);
-    return reply.send(await authService.resetPassword(request.body));
+    const result = await authService.resetPassword(request.body);
+    reply.clearCookie(SESSION_COOKIE, { path: "/" });
+    return reply.send(result);
   });
 
   app.post<{ Body: { password: string; confirmPassword: string } }>("/api/auth/change-password", async (request, reply) => {

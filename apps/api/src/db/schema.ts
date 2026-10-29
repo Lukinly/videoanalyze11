@@ -133,7 +133,7 @@ export const ephemeralAiNotes = pgTable("ephemeral_ai_notes", {
   runId: text("run_id").primaryKey(),
   userId: text("user_id").notNull(),
   notesJson: jsonb("notes_json").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull()
 }, (table) => ({ expiresAtIndex: index("ephemeral_ai_notes_expires_at_idx").on(table.expiresAt) }));
 

@@ -1,3 +1,4 @@
+import type { ServerResponse } from "node:http";
 import type { FastifyInstance } from "fastify";
 import { retentionModeSchema, type RetentionMode } from "@videoanalyze/domain";
 import type { AuthServiceContract } from "./auth.js";
@@ -14,6 +15,11 @@ type ProgressHub = {
 };
 
 export async function registerAnalysisRoutes(app: FastifyInstance, dependencies: { authService: AuthServiceContract; analysisService: AnalysisServiceContract; progressHub: ProgressHub; registerDetailRoute?: boolean }) {
+  const streams = new Set<ServerResponse>();
+  app.addHook("preClose", async () => {
+    for (const stream of streams) stream.end();
+    streams.clear();
+  });
   app.post<{ Params: { videoId: string }; Body: { retentionMode?: unknown } }>("/api/videos/:videoId/analysis-runs", async (request, reply) => {
     const userId = await authenticatedUserId(request, dependencies.authService);
     if (!userId) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
@@ -43,12 +49,19 @@ export async function registerAnalysisRoutes(app: FastifyInstance, dependencies:
     if (!userId) return reply.code(401).send({ code: "UNAUTHORIZED", message: "login required" });
     const run = await dependencies.analysisService.get({ userId, runId: request.params.runId });
     reply.hijack();
-    reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    streams.add(reply.raw);
+    reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
     const unsubscribe = dependencies.progressHub.subscribe(request.params.runId, (event) => {
       reply.raw.write(`event: progress\ndata: ${JSON.stringify(event)}\n\n`);
     });
     reply.raw.write(`event: connected\ndata: ${JSON.stringify({ runId: run.id })}\n\n`);
-    request.raw.on("close", unsubscribe);
+    const heartbeat = setInterval(() => { reply.raw.write(": heartbeat\n\n"); }, 15_000);
+    heartbeat.unref();
+    reply.raw.on("close", () => {
+      streams.delete(reply.raw);
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
   });
 }
 

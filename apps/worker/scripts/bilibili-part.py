@@ -66,9 +66,25 @@ async def audio(item: video.Video, page_index: int, output_dir: str):
                     handle.write(chunk)
 
 
+async def frames(item: video.Video, page_index: int):
+    download = await item.get_download_url(page_index=page_index)
+    streams = download.get("dash", {}).get("video", [])
+    if streams:
+        candidates = [stream for stream in streams if stream.get("height", 0) <= 720] or streams
+        stream = min(candidates, key=lambda entry: entry.get("bandwidth", 0))
+        url = stream.get("baseUrl") or stream.get("base_url")
+    else:
+        # A single progressive stream can also be sought by FFmpeg.
+        parts = download.get("durl", [])
+        url = parts[0].get("url") if len(parts) == 1 else None
+    if not url:
+        raise RuntimeError("public video stream is unavailable")
+    print(json.dumps({"url": url, "http_headers": HEADERS}))
+
+
 async def main():
-    if len(sys.argv) not in (4, 5) or sys.argv[1] not in ("subtitle", "audio"):
-        raise RuntimeError("usage: bilibili-part.py subtitle|audio BVID PART [OUTPUT_DIR]")
+    if len(sys.argv) not in (4, 5) or sys.argv[1] not in ("subtitle", "audio", "frames"):
+        raise RuntimeError("usage: bilibili-part.py subtitle|audio|frames BVID PART [OUTPUT_DIR]")
     mode, bvid, part_text = sys.argv[1:4]
     page_index = int(part_text) - 1
     if page_index < 0:
@@ -76,6 +92,8 @@ async def main():
     item = video.Video(bvid=bvid)
     if mode == "subtitle":
         await subtitle(item, page_index)
+    elif mode == "frames":
+        await frames(item, page_index)
     elif len(sys.argv) == 5:
         await audio(item, page_index, sys.argv[4])
     else:

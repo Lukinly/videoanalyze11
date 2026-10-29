@@ -1,3 +1,5 @@
+import { createProgressHub, type ProgressEvent } from "./events/progress-hub.js";
+import { recoverQueuedRuns } from "./analysis/queue-recovery.js";
 import { HeadBucketCommand } from "@aws-sdk/client-s3";
 import { Queue } from "bullmq";
 import { buildApp } from "./app.js";
@@ -59,7 +61,7 @@ const authService = createAuthService({
           From: { Email: "no-reply@videoanalyze.local", Name: "videoanalyze" },
           To: [{ Email: input.email }],
           Subject: "重置你的 videoanalyze 密码",
-          Text: `请打开以下链接设置新密码：${input.link}`
+          Text: `请打开以下链接设置新密码：${input.link}\n链接 1 小时内有效，仅可使用一次。\n如果你没有申请重置密码，请忽略此邮件。`
         })
       });
       if (!response.ok) throw new Error("password reset email delivery failed");
@@ -69,7 +71,18 @@ const authService = createAuthService({
 const redisConnection = redisConnectionFromUrl(env.redisUrl);
 const queue = new Queue("video-analysis", { connection: redisConnection });
 const resultService = createResultService({ repository: repositories.results });
+const progressHub = createProgressHub({
+  async load(runId) {
+    const result = await pool.query<ProgressEvent>(
+      `SELECT stage, status, progress,
+         (SELECT COUNT(*)::int FROM chunks WHERE run_id = ar.id AND status = 'completed') AS "completedChunks",
+         (SELECT COUNT(*)::int FROM chunks WHERE run_id = ar.id) AS "totalChunks"
+       FROM analysis_runs ar WHERE id = $1`, [runId]);
+    return result.rows[0] ?? null;
+  }
+});
 const app = buildApp({
+  progressHub,
   authService,
   secureCookies: env.nodeEnv === "production",
   uploadService: createUploadService({ transientMedia: repositories.transientMedia, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds, transientCapacityBytes: env.transientCapacityBytes }),
@@ -89,6 +102,28 @@ const app = buildApp({
     storage: async () => { await s3.send(new HeadBucketCommand({ Bucket: env.s3Bucket })); }
   }
 });
+
+let recovering = false;
+const recover = async () => {
+  if (recovering) return;
+  recovering = true;
+  try { await recoverQueuedRuns({ pool, queue }); }
+  catch { console.error("Queue recovery deferred: dependencies unavailable"); }
+  finally { recovering = false; }
+};
+const recoveryTimer = setInterval(() => { void recover(); }, 10_000);
+recoveryTimer.unref();
+void recover();
+app.addHook("onClose", async () => {
+  clearInterval(recoveryTimer);
+  progressHub.close();
+  await queue.close();
+  await pool.end();
+  s3.destroy();
+  s3Presign.destroy();
+});
+process.once("SIGTERM", () => { void app.close(); });
+process.once("SIGINT", () => { void app.close(); });
 
 await app.listen({ port: Number(process.env.PORT ?? 3000), host: "0.0.0.0" });
 

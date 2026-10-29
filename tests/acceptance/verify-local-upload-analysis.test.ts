@@ -134,3 +134,9 @@ describe("local upload and analysis verifier helpers", () => {
     ])).toThrow(/exactly once/);
   });
 });
+
+it("allows only an explicitly selected loopback HTTP storage origin for native development", () => {
+  expect(validatePresignedUploadUrl("http://127.0.0.1:9000/bucket/key", "http://127.0.0.1:9000").port).toBe("9000");
+  expect(() => validatePresignedUploadUrl("http://evil.example/bucket/key", "http://evil.example")).toThrow(/HTTPS/);
+  expect(() => validatePresignedUploadUrl("http://127.0.0.1:9001/bucket/key", "http://127.0.0.1:9000")).toThrow();
+});

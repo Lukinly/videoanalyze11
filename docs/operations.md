@@ -5,6 +5,8 @@ from that directory. See [README](../README.md) and
 [consolidation record](consolidation.md) for the current baseline and known issues.
 Older handoff documents retain their original paths and describe historical environments.
 
+For native macOS development without Docker, see [local development](local-development.md).
+
 ## Local verification
 
 1. Install Node.js 24+, Corepack, FFmpeg and FFprobe. Docker builds include the media tools and platform downloaders.
@@ -65,7 +67,7 @@ The default input is `.local/test.mp4`, resolved relative to the repository rath
 
 ## Retention and limits
 
-Original media and local audio/chunks are cleaned after completion, failure or cancellation. Unprocessed uploads have a 24-hour fallback expiry. Standard results remain available until explicitly deleted; privacy results are intended to expire 24 hours after completion. `ORIGINAL_RETENTION_DAYS` and `RESULT_RETENTION_DAYS` are legacy compatibility settings and do not control that lifecycle. `MAX_UPLOAD_BYTES`, `MAX_VIDEO_DURATION_SECONDS`, queue limits and worker concurrency should be tuned to available CPU, storage and provider quota. See the consolidation record for current lifecycle defects that still need repair.
+Original media and local audio/chunks are cleaned after completion, failure or cancellation. Unprocessed uploads have a 24-hour fallback expiry. Standard results remain available until explicitly deleted; privacy results are intended to expire 24 hours after completion. `ORIGINAL_RETENTION_DAYS` and `RESULT_RETENTION_DAYS` are legacy compatibility settings and do not control that lifecycle. `MAX_UPLOAD_BYTES`, `MAX_VIDEO_DURATION_SECONDS`, queue limits and worker concurrency should be tuned to available CPU, storage and provider quota. See the consolidation record for the lifecycle fixes and validation boundaries.
 
 ## Encrypted off-site database backups
 

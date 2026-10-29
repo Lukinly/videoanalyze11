@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
@@ -7,6 +7,12 @@ const migrationDirectory = join(dirname(fileURLToPath(import.meta.url)), "migrat
 
 export async function migrateDatabase(pool: Pool, directory = migrationDirectory): Promise<void> {
   await pool.query("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL)");
+  // Host builds do not copy SQL into dist; Docker builds do.
+  try { await access(directory); }
+  catch {
+    if (directory !== migrationDirectory) throw new Error("migration directory does not exist");
+    directory = join(dirname(fileURLToPath(import.meta.url)), "../../src/db/migrations");
+  }
   const files = await readdir(directory);
   for (const file of files.filter((name) => /^\d+_.+\.sql$/.test(name)).sort()) {
     const version = file.split("_", 1)[0];

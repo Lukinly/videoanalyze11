@@ -148,12 +148,13 @@ export const api = {
   rejectAdminTopup: (id: string, note: string) => request<CreditTopupRequest>(`/api/admin/credit-requests/${encodeURIComponent(id)}/reject`, { method: "POST", body: JSON.stringify({ note }) }),
   listAdminAuditLogs: () => request<{ items: AdminAuditLog[] }>("/api/admin/audit-logs"),
   resetPassword: (input: { token: string; password: string; confirmPassword: string }) => request<{ ok: true }>("/api/auth/password-reset", { method: "POST", body: JSON.stringify(input) }),
+  forgotPassword: (input: { email: string }) => request<{ ok: true }>("/api/auth/forgot-password", { method: "POST", body: JSON.stringify(input) }),
   changePassword: (input: { password: string; confirmPassword: string }) => request<{ ok: true }>("/api/auth/change-password", { method: "POST", body: JSON.stringify(input) })
 };
 
 export function subscribeToAnalysis(
   runId: string,
-  onProgress: (event: { stage?: string; progress?: number; completedChunks?: number; totalChunks?: number; error?: string }) => void,
+  onProgress: (event: { stage?: string; status?: string; progress?: number; completedChunks?: number; totalChunks?: number; error?: string }) => void,
   onError?: () => void
 ) {
   const events = new EventSource(`${API_BASE_URL}/api/analysis-runs/${encodeURIComponent(runId)}/events`, { withCredentials: true });

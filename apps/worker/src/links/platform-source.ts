@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { createProcessRunner } from "../media/process-runner.js";
 
@@ -13,9 +14,21 @@ export function materializeImportedSegments(runId: string, segments: ImportedSeg
   return segments.map((segment, index) => ({ ...segment, id: `${runId}_seg_${index + 1}`, runId }));
 }
 
-export function createPlatformSourceLoader(input: { runner?: ReturnType<typeof createProcessRunner> } = {}) {
+export function createPlatformSourceLoader(input: { runner?: ReturnType<typeof createProcessRunner>; allowBrowserFallback?: boolean } = {}) {
   const runner = input.runner ?? createProcessRunner();
+  const allowBrowserFallback = input.allowBrowserFallback ?? (process.env.BILIBILI_BROWSER_FALLBACK === "1" || (process.env.NODE_ENV === "development" && process.env.BILIBILI_BROWSER_FALLBACK !== "0"));
   return {
+    async resolveFrameSource(source: RemoteVideoSource, signal?: AbortSignal): Promise<{ path: string; headers?: Record<string, string> }> {
+      signal?.throwIfAborted();
+      const command = source.platform === "bilibili" ? bilibiliSourceCommand("frames", source.url, "") : {
+        command: "yt-dlp", args: ["--no-playlist", "--skip-download", "--dump-single-json", "-f",
+          "bestvideo[height<=720]/best[height<=720]/bestvideo/best", "--", source.url]
+      };
+      const result = await runner.run(command.command, command.args, { signal, timeoutMs: 45_000, maxOutputBytes: 8 * 1024 * 1024 });
+      const payload = JSON.parse(result.stdout) as { url?: string; http_headers?: Record<string, string> };
+      if (!payload.url || !/^https?:\/\//.test(payload.url)) throw new Error("platform video frames are unavailable");
+      return { path: payload.url, headers: payload.http_headers };
+    },
     async tryTranscript(source: RemoteVideoSource, directory: string, signal?: AbortSignal): Promise<ImportedSegment[] | null> {
       if (!source.subtitleLanguage) return null;
       await mkdir(directory, { recursive: true });
@@ -24,8 +37,18 @@ export function createPlatformSourceLoader(input: { runner?: ReturnType<typeof c
           const command = bilibiliSourceCommand("subtitle", source.url, directory);
           const result = await runner.run(command.command, command.args, { signal, timeoutMs: 120_000, maxOutputBytes: 8 * 1024 * 1024 });
           const segments = parseBilibiliTimeline(result.stdout);
-          return segments.length ? segments : null;
-        } catch (error) { if (signal?.aborted) throw error; return null; }
+          if (segments.length) return segments;
+        } catch (error) { if (signal?.aborted) throw error; }
+        if (allowBrowserFallback) {
+          try {
+            const url = new URL(source.url);
+            const bvid = url.pathname.split("/").filter(Boolean).at(-1)!;
+            const result = await runner.run("opencli", ["bilibili", "subtitle", bvid, "--page", url.searchParams.get("p") ?? "1", "-f", "json"], { signal, timeoutMs: 120_000, maxOutputBytes: 8 * 1024 * 1024 });
+            const segments = parseBilibiliTimeline(result.stdout);
+            return segments.length ? segments : null;
+          } catch (error) { if (signal?.aborted) throw error; }
+        }
+        return null;
       }
       try {
         await runner.run("yt-dlp", ["--skip-download", "--no-playlist", "--write-sub", "--write-auto-sub", "--sub-langs", source.subtitleLanguage,
@@ -52,13 +75,13 @@ export function createPlatformSourceLoader(input: { runner?: ReturnType<typeof c
   };
 }
 
-export function bilibiliSourceCommand(mode: "subtitle" | "audio", rawUrl: string, directory: string) {
+export function bilibiliSourceCommand(mode: "subtitle" | "audio" | "frames", rawUrl: string, directory: string) {
   const url = new URL(rawUrl);
   const part = Number(url.searchParams.get("p") ?? 1);
   const bvid = url.pathname.match(/\/video\/(BV[1-9A-HJ-NP-Za-km-z]{10})(?:\/|$)/)?.[1];
   if (!bvid || !Number.isSafeInteger(part) || part < 1) throw new Error("invalid Bilibili source URL");
-  if (mode === "audio" || part > 1) {
-    const args = [process.env.BILIBILI_PART_HELPER ?? "/app/bilibili-part.py", mode, bvid, String(part)];
+  if (mode === "audio" || mode === "frames" || part > 1) {
+    const args = [process.env.BILIBILI_PART_HELPER ?? fileURLToPath(new URL("../../scripts/bilibili-part.py", import.meta.url)), mode, bvid, String(part)];
     if (mode === "audio") args.push(directory);
     return { command: "python3", args };
   }
@@ -87,10 +110,16 @@ export function parseBilibiliTimeline(value: string): ImportedSegment[] {
   const cues = findCueArray(parsed);
   if (!cues) return [];
   return cues.flatMap((cue) => {
-    const start = Number(cue.from ?? cue.start ?? cue.start_time); const end = Number(cue.to ?? cue.end ?? cue.end_time);
+    const start = parseCueSeconds(cue.from ?? cue.start ?? cue.start_time); const end = parseCueSeconds(cue.to ?? cue.end ?? cue.end_time);
     const text = String(cue.content ?? cue.text ?? cue.body ?? "").trim();
     return Number.isFinite(start) && Number.isFinite(end) && end > start && text ? [{ start, end, text }] : [];
   });
+}
+
+function parseCueSeconds(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^\d+(?:\.\d+)?s?$/.test(value.trim())) return Number(value.trim().replace(/s$/, ""));
+  return Number.NaN;
 }
 
 function findCueArray(value: unknown): Array<Record<string, unknown>> | null {

@@ -47,6 +47,18 @@ describe("detailed notes runner", () => {
     await expect(createNotesRunner({ notes, state }).run({ runId: "run" })).rejects.toThrow(/citation/i);
     expect(state.saveNotes).not.toHaveBeenCalled();
   });
+
+  it("saves frames captured at real transcript times, discarding model-supplied images", async () => {
+    const notes = providerDouble(10_000);
+    const generated = noteResult("Single", "seg_1");
+    notes.generateNotes.mockResolvedValue({ ...generated, sections: [{ ...generated.sections[0], frame: { timestampSeconds: 999, dataUrl: "data:image/jpeg;base64,AAAA" } }] });
+    const state = stateDouble();
+    const captureFrame = vi.fn().mockResolvedValue("data:image/jpeg;base64,/9j/2Q==");
+    const result = await createNotesRunner({ notes, state, captureFrame }).run({ runId: "run" });
+    expect(captureFrame).toHaveBeenCalledWith(12);
+    expect(result.sections[0].frame?.timestampSeconds).toBe(12);
+    expect(state.saveNotes).toHaveBeenCalledWith("run", result);
+  });
 });
 
 function noteResult(title: string, segmentId: string) {

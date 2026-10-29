@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPlatformInspector, resolveBilibiliShortUrl } from "./platform-inspector.js";
 
 describe("platform metadata inspector", () => {
@@ -43,6 +43,44 @@ describe("platform metadata inspector", () => {
       fetchBilibiliView: async () => ({ pages: [{ page: 1, part: "一", duration: 600 }] })
     });
     await expect(inspector.inspect("https://www.bilibili.com/video/BV1AB411c7mD?p=3")).rejects.toMatchObject({ code: "UNSUPPORTED_MEDIA" });
+  });
+
+  const browserRows = (overrides: Record<string, unknown> = {}) => JSON.stringify(Object.entries({ bvid: "BV1AB411c7mD", page: "1", title: "第一集", series_title: "公开视频", author: "UP (mid: 123)", duration: "5m49s (349s)", thumbnail: "https://img.example/b.jpg", requires_payment: "false", redirect_url: "", ...overrides }).map(([field, value]) => ({ field, value })));
+
+  it("uses the local browser when bili is blocked, requesting the first part instead of the combined duration", async () => {
+    const run = vi.fn(async (command: string) => {
+      if (command === "bili") throw new Error("Bilibili HTTP 412");
+      return browserRows();
+    });
+    const inspector = createPlatformInspector({ run, allowBrowserFallback: true });
+    await expect(inspector.inspect("https://www.bilibili.com/video/BV1AB411c7mD")).resolves.toMatchObject({ title: "公开视频", duration: 349, author: "UP", subtitleLanguage: "zh-CN" });
+    expect(run).toHaveBeenLastCalledWith("opencli", ["bilibili", "video", "BV1AB411c7mD", "--page", "1", "-f", "json"]);
+  });
+
+  it("falls back when the separate view API is blocked and preserves the requested part", async () => {
+    const run = vi.fn(async (command: string) => command === "bili" ? JSON.stringify({ title: "公开视频", duration: 1200 }) : browserRows({ page: "3", title: "第三集", duration: "1m0s (60s)" }));
+    const inspector = createPlatformInspector({ run, allowBrowserFallback: true, fetchBilibiliView: async () => { throw new Error("HTTP 412"); } });
+    await expect(inspector.inspect("https://www.bilibili.com/video/BV1AB411c7mD?p=3")).resolves.toMatchObject({ title: "公开视频 · 第三集", part: 3, duration: 60 });
+    expect(run).toHaveBeenLastCalledWith("opencli", ["bilibili", "video", "BV1AB411c7mD", "--page", "3", "-f", "json"]);
+  });
+
+  it("keeps browser access disabled when configured and returns an actionable error without shell details", async () => {
+    const run = vi.fn(async () => { throw new Error("Bilibili HTTP 412 <html>security control</html>"); });
+    const inspector = createPlatformInspector({ run, allowBrowserFallback: false });
+    await expect(inspector.inspect("https://www.bilibili.com/video/BV1AB411c7mD")).rejects.toMatchObject({ code: "UNSUPPORTED_MEDIA", status: 422, message: "B站暂时限制了自动读取（HTTP 412）。请稍后重试，或上传本地视频。" });
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("does not accept browser metadata for another video or unavailable part", async () => {
+    for (const overrides of [{ bvid: "BV1BFnh6KEuW" }, { page: "2" }, { duration: "unknown" }]) {
+      const inspector = createPlatformInspector({ allowBrowserFallback: true, run: async (command) => { if (command === "bili") throw new Error("HTTP 412"); return browserRows(overrides); } });
+      await expect(inspector.inspect("https://www.bilibili.com/video/BV1AB411c7mD")).rejects.toMatchObject({ code: "UNSUPPORTED_MEDIA" });
+    }
+  });
+
+  it("rejects paid content returned by the browser before importing", async () => {
+    const inspector = createPlatformInspector({ allowBrowserFallback: true, run: async (command) => { if (command === "bili") throw new Error("HTTP 412"); return browserRows({ requires_payment: "true" }); } });
+    await expect(inspector.inspect("https://www.bilibili.com/video/BV1AB411c7mD")).rejects.toMatchObject({ code: "UNSUPPORTED_MEDIA", message: expect.stringContaining("付费") });
   });
 });
 

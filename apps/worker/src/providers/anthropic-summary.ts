@@ -1,3 +1,4 @@
+import { normalizeProviderCitationTimes } from "./structured-output.js";
 import { aiNotesSchema, summaryResultSchema, ProviderError, type AiNotes, type AiNotesProvider, type SummaryCapabilities, type SummaryInput, type SummaryProvider, type SummaryResult } from "@videoanalyze/domain";
 import { providerErrorFromResponse } from "./http-client.js";
 import { summarySystemPrompt } from "./summary-prompt.js";
@@ -76,25 +77,5 @@ export function createAnthropicSummaryProvider(input: {
       }
       throw new ProviderError("invalid_request", "notes response did not match the AI notes schema");
     }
-  };
-}
-
-function normalizeProviderCitationTimes(value: unknown): unknown {
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  if (!Array.isArray(record.sections)) return value;
-  return {
-    ...record,
-    sections: record.sections.map((section) => {
-      if (!section || typeof section !== "object") return section;
-      const sectionRecord = section as Record<string, unknown>;
-      if (!Array.isArray(sectionRecord.citations)) return section;
-      return {
-        ...sectionRecord,
-        citations: sectionRecord.citations.map((citation) => citation && typeof citation === "object"
-          ? { ...(citation as Record<string, unknown>), timestampSeconds: 0 }
-          : citation)
-      };
-    })
   };
 }

@@ -4,7 +4,7 @@ import type { RetentionMode } from "@videoanalyze/domain";
 
 export type UploadedVideo = { videoId: string; fileName: string; playbackUrl: string; fileSize: number; estimatedCost?: number; retentionMode: RetentionMode; sourcePlatform?: "upload" | "youtube" | "bilibili"; sourceUrl?: string | null; sourceAuthor?: string | null; thumbnailUrl?: string | null };
 
-export function UploadVideo({ onUploaded }: { onUploaded: (video: UploadedVideo) => void; availableCredits?: number }) {
+export function UploadVideo({ onUploaded, onRequireLogin }: { onUploaded: (video: UploadedVideo) => void | Promise<void>; availableCredits?: number; onRequireLogin?: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState(0);
@@ -14,14 +14,18 @@ export function UploadVideo({ onUploaded }: { onUploaded: (video: UploadedVideo)
 
   async function upload() {
     if (!file) return;
+    if (onRequireLogin) { onRequireLogin(); return; }
     setBusy(true);
     setError(null);
     setProgress(0);
+    let playbackUrl: string | undefined;
     try {
       const session = await api.createUploadSession({ fileName: file.name, contentType: file.type || "video/mp4", contentLength: file.size });
       await putUpload(session.uploadUrl, file, setProgress);
-      onUploaded({ videoId: session.videoId, fileName: file.name, playbackUrl: URL.createObjectURL(file), fileSize: session.fileSize, retentionMode });
+      playbackUrl = URL.createObjectURL(file);
+      await onUploaded({ videoId: session.videoId, fileName: file.name, playbackUrl, fileSize: session.fileSize, retentionMode });
     } catch (cause) {
+      if (playbackUrl) URL.revokeObjectURL(playbackUrl);
       setError(cause instanceof Error ? cause.message : "上传失败");
     } finally {
       setBusy(false);
@@ -30,8 +34,8 @@ export function UploadVideo({ onUploaded }: { onUploaded: (video: UploadedVideo)
 
   return (
     <section className="upload-card">
-      <div className="upload-copy"><p className="eyebrow">New analysis</p><h2>把视频交给工作台</h2><p>先从 H.264/AAC MP4 开始，浏览器播放和 V0 逐字稿体验最稳定。</p></div>
-      <input ref={inputRef} className="visually-hidden" type="file" accept="video/mp4,video/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+      <div className="upload-copy"><p className="eyebrow">New analysis</p><h2>把视频交给工作台</h2><p>选择一段课程、讲座或分享视频，生成逐字稿与详细笔记。</p></div>
+      <input ref={inputRef} aria-label="选择用于分析的视频" className="visually-hidden" type="file" accept="video/mp4,video/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
       <fieldset className="retention-options"><legend>结果保留方式</legend><label><input type="radio" name="retention" checked={retentionMode === "standard"} onChange={() => setRetentionMode("standard")} /> 标准：文字结果长期保留</label><label><input type="radio" name="retention" checked={retentionMode === "privacy"} onChange={() => setRetentionMode("privacy")} /> 隐私：完成后 24 小时自动删除文字结果</label></fieldset>
       <p className="retention-copy">分析进入后台后，离开或刷新页面不会取消任务；原视频、音频和切片在任务终态后会从服务器删除。</p>
       <p className="retention-copy">费用由服务器读取真实时长后按阶梯计费；文件大小不参与扣费，最长支持 4 小时。</p>
