@@ -53,24 +53,26 @@ corepack pnpm local:dev
 
 访问 http://localhost:5173，验证码在 http://localhost:8025 查看。命令自动启动基础服务、构建、迁移和应用；Ctrl+C 停止，数据保留在 `.local/`。缺少模型凭据时 Web/API 可用，Worker 等待配置。详见 [本地运行与验证](docs/local-development.md)。
 
-## Docker 启动应用
+## Docker 公网部署
 
-安装 Docker Compose，首次运行时复制 `.env.example` 为 `.env`，配置 `GROQ_API_KEY` 及 `llm_api_key`、`llm_api_base_url`、`llm_api_model`。本地邮箱链接可使用 `VERIFICATION_BASE_URL=https://localhost`。
+使用独立的生产配置：163 SMTP 发送验证码，Garage 提供自建私有视频存储，只有 Caddy 发布 80/443；数据库、SMTP 和 AI 密钥按服务分别挂载。
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml up -d --build \
-  postgres redis minio minio-init migrate mailpit api worker web proxy
-# 以下证书安装脚本适用于 Linux/WSL；macOS 需自行导出并信任 Caddy 本地 CA。
-bash scripts/setup-local-https.sh
+cp .env.production.example .env.production
+node scripts/init-production-secrets.mjs
+# 设置真实域名、163 发件地址和模型配置，填写服务器密钥文件并校对读取权限。
+docker compose --env-file .env.production -f infra/docker-compose.production.yml up -d --build --wait
+docker compose --env-file .env.production -f infra/docker-compose.production.yml exec api node dist/cli/mail-verify.js
 ```
 
-Web 为 `https://localhost`，Mailpit 为 `http://localhost:8025`。备份服务在配置独立备份存储后单独启动。数据库迁移自动执行；停止服务使用 `docker compose --env-file .env -f infra/docker-compose.yml down`，保留已有数据卷。
+具体密钥权限、仅用 Docker 初始化、管理员创建、备份与升级见 [Docker 公网部署文档](docs/docker-production.md)。原 MinIO 社区版已停止维护，旧本地 Compose 不作为新公网部署入口。
 
-真实上传验收需要运行中的服务、有效 Provider 配置和本地测试视频。脚本默认读取仓库内的 `.local/test.mp4`，也可以设置 `VIDEO_PATH`；测试媒体与 `.env` 不提交到 Git。
+可用 `corepack pnpm verify:docker` 运行隔离的容器验收，使用本地模拟 SMTP/AI，不向外发送邮件或调用付费 AI。
 
 ## 维护资料与当前状态
 
 - [2026-10-29 本地部署版本说明](docs/local-deployment-2026-10-29.md)
+- [Docker 公网部署与 SMTP](docs/docker-production.md)
 - [常用命令](docs/commands.md)
 - [部署与数据保留](docs/operations.md)
 - [整合来源及待修复问题](docs/consolidation.md)

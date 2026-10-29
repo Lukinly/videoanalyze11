@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /workspace
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
@@ -11,7 +11,7 @@ RUN rm -f packages/domain/tsconfig.tsbuildinfo
 RUN pnpm --filter @videoanalyze/domain build
 RUN pnpm --filter @videoanalyze/web build
 
-FROM nginx:1.27-alpine
+FROM nginx:stable-alpine
 COPY --from=build /workspace/apps/web/dist /usr/share/nginx/html
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

@@ -77,6 +77,8 @@ describe("registration verification repository", () => {
     })).resolves.toBe(true);
     const newRecord = await registrationCodes.findRegistrationCode("user@example.com");
     expect(newRecord?.id).not.toBe(oldRecord?.id);
+    await repositories.auth.invalidateRegistrationCode({ email: "user@example.com", codeHash: oldRecord!.codeHash, createdAt: oldRecord!.createdAt });
+    expect((await registrationCodes.findRegistrationCode("user@example.com"))?.expiresAt).toEqual(newRecord?.expiresAt);
     await expect(registrationCodes.markRegistrationCodeUsed(oldRecord!.id, oldRecord!.codeHash, new Date("2026-08-04T00:02:00Z"))).resolves.toBe(false);
     await expect(registrationCodes.markRegistrationCodeUsed(newRecord!.id, newRecord!.codeHash, new Date("2026-08-04T00:03:00Z"))).resolves.toBe(true);
   });

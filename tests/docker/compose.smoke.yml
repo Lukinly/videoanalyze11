@@ -1,0 +1,29 @@
+# Only for scripts/verify-docker-deployment.mjs; never include in public deployments.
+services:
+  api:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/secrets/smtp_test_cert
+    secrets: [smtp_test_cert]
+  worker:
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/secrets/smtp_test_cert
+      CURL_CA_BUNDLE: /run/secrets/smtp_test_cert
+    secrets: [smtp_test_cert]
+  proxy:
+    volumes:
+      - ../tests/docker/Caddyfile.smoke:/etc/caddy/Caddyfile:ro
+  smtp-test:
+    image: node:24-bookworm-slim
+    init: true
+    user: "1000:1000"
+    command: [node, /smtp-server.mjs]
+    volumes:
+      - ../tests/docker/smtp-server.mjs:/smtp-server.mjs:ro
+    secrets: [smtp_password, smtp_test_cert, smtp_test_key]
+    security_opt: [no-new-privileges:true]
+    networks:
+      default:
+        aliases: [api.groq.com]
+secrets:
+  smtp_test_cert: { file: "${SMOKE_DIR:?test-only path}/smtp.crt" }
+  smtp_test_key: { file: "${SMOKE_DIR:?test-only path}/smtp.key" }

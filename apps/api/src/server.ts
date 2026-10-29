@@ -1,3 +1,5 @@
+import { createMailer } from "./mail/mailer.js";
+import { createAuthRateLimiter } from "./auth/rate-limiter.js";
 import { createProgressHub, type ProgressEvent } from "./events/progress-hub.js";
 import { recoverQueuedRuns } from "./analysis/queue-recovery.js";
 import { HeadBucketCommand } from "@aws-sdk/client-s3";
@@ -23,53 +25,26 @@ const repositories = createRepositories(pool, { transientCapacityBytes: env.tran
 const s3 = createS3Client({ endpoint: env.s3Endpoint, region: env.s3Region, accessKey: env.s3AccessKey, secretKey: env.s3SecretKey });
 const s3Presign = createS3Client({ endpoint: env.s3PublicEndpoint, region: env.s3Region, accessKey: env.s3AccessKey, secretKey: env.s3SecretKey });
 const storage = createS3ObjectStorage({ client: s3 as never, presignClient: s3Presign as never, bucket: env.s3Bucket });
-const authService = createAuthService({
-  repositories,
-  verificationBaseUrl: env.verificationBaseUrl,
-  mailer: {
-    async sendRegistrationCode(input) {
-      const response = await fetch(env.mailApiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          From: { Email: "no-reply@videoanalyze.local", Name: "videoanalyze" },
-          To: [{ Email: input.email }],
-          Subject: "验证你的 videoanalyze 注册验证码",
-          Text: `你的注册验证码是：${input.code}\n验证码 10 分钟内有效。`
-        })
-      });
-      if (!response.ok) throw new Error("registration code email delivery failed");
-    },
-    async sendVerification(input) {
-      const response = await fetch(env.mailApiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          From: { Email: "no-reply@videoanalyze.local", Name: "videoanalyze" },
-          To: [{ Email: input.email }],
-          Subject: "验证你的 videoanalyze 账号",
-          Text: `请打开以下链接完成邮箱验证：${input.link}`
-        })
-      });
-      if (!response.ok) throw new Error("verification email delivery failed");
-    },
-    async sendPasswordReset(input) {
-      const response = await fetch(env.mailApiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          From: { Email: "no-reply@videoanalyze.local", Name: "videoanalyze" },
-          To: [{ Email: input.email }],
-          Subject: "重置你的 videoanalyze 密码",
-          Text: `请打开以下链接设置新密码：${input.link}\n链接 1 小时内有效，仅可使用一次。\n如果你没有申请重置密码，请忽略此邮件。`
-        })
-      });
-      if (!response.ok) throw new Error("password reset email delivery failed");
-    }
-  }
-});
 const redisConnection = redisConnectionFromUrl(env.redisUrl);
 const queue = new Queue("video-analysis", { connection: redisConnection });
+const registeredLimits = new Set<string>();
+const limit = createAuthRateLimiter(async (script, keys, args) => {
+  const client = await queue.client;
+  const name = `videoanalyzeAuthLimit${keys.length}`;
+  if (!registeredLimits.has(name)) {
+    client.defineCommand(name, { numberOfKeys: keys.length, lua: script });
+    registeredLimits.add(name);
+  }
+  return client.runCommand(name, [...keys, ...args]);
+});
+const mailer = createMailer(env.mail, {
+  beforeSend: (email) => limit([
+    { scope: "mail:recipient", identity: email, limit: env.mailRecipientDailyLimit, windowMs: 86_400_000 },
+    { scope: "mail:global", identity: "all", limit: env.mailDailyLimit, windowMs: 86_400_000 }
+  ]),
+  reportFailure: (category) => console.error(JSON.stringify({ event: "mail_delivery_failed", category }))
+});
+const authService = createAuthService({ repositories, verificationBaseUrl: env.verificationBaseUrl, mailer });
 const resultService = createResultService({ repository: repositories.results });
 const progressHub = createProgressHub({
   async load(runId) {
@@ -84,6 +59,9 @@ const progressHub = createProgressHub({
 const app = buildApp({
   progressHub,
   authService,
+  trustProxy: env.nodeEnv === "production" ? 1 : false,
+  authOrigin: env.nodeEnv === "production" ? env.verificationBaseUrl : undefined,
+  authRequestLimit: (ip) => limit([{ scope: "requests", identity: ip, limit: env.authRequestsPerMinute, windowMs: 60_000 }]),
   secureCookies: env.nodeEnv === "production",
   uploadService: createUploadService({ transientMedia: repositories.transientMedia, storage, maxBytes: env.maxUploadBytes, maxDurationSeconds: env.maxVideoDurationSeconds, transientCapacityBytes: env.transientCapacityBytes }),
   analysisService: createAnalysisService({ videos: repositories.videos, runs: repositories.runs, queue, admissionLimits: { maxQueuedPerUser: env.maxQueuedRunsPerUser, maxTotalQueued: env.maxTotalQueuedRuns, maxEstimatedWaitSeconds: env.maxQueueWaitSeconds } }),
@@ -117,6 +95,7 @@ void recover();
 app.addHook("onClose", async () => {
   clearInterval(recoveryTimer);
   progressHub.close();
+  mailer.close();
   await queue.close();
   await pool.end();
   s3.destroy();

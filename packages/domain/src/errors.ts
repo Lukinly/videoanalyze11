@@ -1,4 +1,6 @@
 export type DomainErrorCode =
+  | "MAIL_UNAVAILABLE"
+  | "AUTH_RATE_LIMITED"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "INVALID_CREDENTIALS"

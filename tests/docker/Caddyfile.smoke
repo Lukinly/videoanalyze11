@@ -1,0 +1,13 @@
+https://app.smoke.test {
+  tls internal
+  handle /api/* {
+    reverse_proxy api:3000
+  }
+  handle {
+    reverse_proxy web:80
+  }
+}
+https://media.smoke.test {
+  tls internal
+  reverse_proxy storage:3900
+}

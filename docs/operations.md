@@ -1,5 +1,7 @@
 # Linux deployment notes
 
+> 新公网部署请使用 [Docker 公网部署与 SMTP](docker-production.md) 及 `infra/docker-compose.production.yml`。以下 MinIO/Mailpit 步骤仅保留为历史本地操作参考，不能直接作为当前公网部署方案。
+
 The maintained project is the repository root on `main`. Run all commands below
 from that directory. See [README](../README.md) and
 [consolidation record](consolidation.md) for the current baseline and known issues.

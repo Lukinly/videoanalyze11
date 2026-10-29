@@ -15,7 +15,12 @@ export type AuthServiceContract = {
 
 const SESSION_COOKIE = "video_session";
 
-export async function registerAuthRoutes(app: FastifyInstance, authService: AuthServiceContract, options: { secureCookies?: boolean } = {}) {
+export async function registerAuthRoutes(app: FastifyInstance, authService: AuthServiceContract, options: { secureCookies?: boolean; origin?: string; requestLimit?: (ip: string) => Promise<void> } = {}) {
+  app.addHook("onRequest", async (request) => {
+    if (request.method !== "POST") return;
+    if (options.origin && request.headers.origin && request.headers.origin !== options.origin) throw new DomainError("FORBIDDEN", "request origin is not allowed", 403);
+    if (request.routeOptions.url !== "/api/auth/logout") await options.requestLimit?.(request.ip);
+  });
   app.post<{ Body: { email: string } }>("/api/auth/registration-code", async (request, reply) => {
     if (!request.body || typeof request.body.email !== "string") throw new DomainError("INVALID_CREDENTIALS", "email is required", 400);
     return reply.code(202).send(await authService.sendRegistrationCode({ email: request.body.email }));

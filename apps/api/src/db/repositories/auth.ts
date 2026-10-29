@@ -95,6 +95,9 @@ export function createAuthRepository(pool: Pool) {
         client.release();
       }
     },
+    async invalidateRegistrationCode(input: { email: string; codeHash: string; createdAt: Date }): Promise<void> {
+      await pool.query("UPDATE registration_verifications SET expires_at = created_at WHERE email = $1 AND code_hash = $2 AND created_at = $3 AND used_at IS NULL", [input.email, input.codeHash, input.createdAt]);
+    },
     async findRegistrationCode(email: string): Promise<RegistrationCodeRecord | null> {
       const result = await pool.query<RegistrationCodeRecord>(
         `SELECT id, email, code_hash AS "codeHash", expires_at AS "expiresAt",
@@ -160,6 +163,9 @@ export function createAuthRepository(pool: Pool) {
       } finally {
         client.release();
       }
+    },
+    async invalidatePasswordResetToken(tokenHash: string): Promise<void> {
+      await pool.query("UPDATE password_reset_tokens SET used_at = created_at WHERE token_hash = $1 AND used_at IS NULL", [tokenHash]);
     },
     async completePasswordReset(input: { tokenHash: string; passwordHash: string; now: Date }): Promise<boolean> {
       const client = await pool.connect();

@@ -15,3 +15,6 @@ apps/web/test-results
 *.log
 branches
 .local
+
+secrets
+**/secrets

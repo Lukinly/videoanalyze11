@@ -92,3 +92,24 @@ describe("auth routes", () => {
     expect(response.headers["set-cookie"]).toEqual(expect.stringContaining("video_session=;"));
   });
 });
+
+
+describe("public auth protection", () => {
+  it("checks origin and rate limits before calling account services, and ignores untrusted forwarded IPs", async () => {
+    const { buildApp } = await import("../app.js");
+    const { DomainError } = await import("@videoanalyze/domain");
+    const requestLimit = vi.fn().mockRejectedValue(new DomainError("AUTH_RATE_LIMITED", "请求过于频繁", 429));
+    const send = vi.fn();
+    const authService = { sendRegistrationCode: send } as unknown as import("./auth.js").AuthServiceContract;
+    const app = buildApp({ authService, authOrigin: "https://app.example.com", authRequestLimit: requestLimit });
+    try {
+      const crossSite = await app.inject({ method: "POST", url: "/api/auth/registration-code", headers: { origin: "https://evil.example" }, payload: { email: "user@example.com" } });
+      expect(crossSite.statusCode).toBe(403);
+      expect(requestLimit).not.toHaveBeenCalled();
+      const blocked = await app.inject({ method: "POST", url: "/api/auth/registration-code", headers: { "x-forwarded-for": "203.0.113.99", origin: "https://app.example.com" }, payload: { email: "user@example.com" } });
+      expect(blocked.statusCode).toBe(429);
+      expect(requestLimit).toHaveBeenCalledWith("127.0.0.1");
+      expect(send).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+});

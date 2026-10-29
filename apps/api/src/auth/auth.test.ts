@@ -64,6 +64,16 @@ describe("authentication service", () => {
       .resolves.toMatchObject({ user: { id: registered.userId } });
   });
 
+  it("invalidates a failed delivery while preserving the resend cooldown", async () => {
+    mailer.sendRegistrationCode.mockRejectedValueOnce(new Error("SMTP unavailable"));
+    await expect(auth.sendRegistrationCode({ email: "failed@example.com" })).rejects.toThrow("SMTP unavailable");
+    const failed = await repositories.auth.findRegistrationCode("failed@example.com");
+    expect(failed!.expiresAt.getTime()).toBe(failed!.createdAt.getTime());
+    const code = mailer.sendRegistrationCode.mock.calls[0][0].code as string;
+    await expect(auth.register({ email: "failed@example.com", password: "safe password", confirmPassword: "safe password", verificationCode: code })).rejects.toMatchObject({ code: "INVALID_REGISTRATION_CODE" });
+    await expect(auth.sendRegistrationCode({ email: "failed@example.com" })).rejects.toMatchObject({ code: "REGISTRATION_CODE_RATE_LIMITED" });
+  });
+
   it("rejects a wrong code without creating a user", async () => {
     await auth.sendRegistrationCode({ email: "wrong@example.com" });
 

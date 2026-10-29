@@ -9,14 +9,15 @@
     "admin:create": "corepack pnpm build && node --env-file-if-exists=../../.env dist/cli/admin-create.js"
   },
   "dependencies": {
-    "@videoanalyze/domain": "workspace:*",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "@fastify/cookie": "^11.0.0",
+    "@videoanalyze/domain": "workspace:*",
     "bcryptjs": "^3.0.0",
+    "bullmq": "^5.0.0",
     "drizzle-orm": "^0.38.0",
     "fastify": "^5.0.0",
-    "@fastify/cookie": "^11.0.0",
-    "bullmq": "^5.0.0",
+    "nodemailer": "10.3.0",
     "pg": "^8.0.0"
   }
 }

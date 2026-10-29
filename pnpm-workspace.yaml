@@ -6,3 +6,5 @@ forceLegacyDeploy: true
 allowBuilds:
   esbuild: true
   msgpackr-extract: true
+minimumReleaseAgeExclude:
+  - nodemailer@10.3.0

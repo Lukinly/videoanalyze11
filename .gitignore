@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !.env.local.example
+!.env.production.example
 node_modules/
 dist/
 build/
@@ -18,3 +19,5 @@ coverage/
 
 **/test-results/
 **/playwright-report/
+
+/secrets/

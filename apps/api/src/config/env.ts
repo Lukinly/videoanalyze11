@@ -1,6 +1,7 @@
+import { parseMailConfig, type MailConfig } from "../mail/config.js";
+
 export type AppEnv = {
   nodeEnv: "development" | "test" | "production";
-  groqApiKey: string;
   databaseUrl: string;
   redisUrl: string;
   s3Endpoint: string;
@@ -9,7 +10,10 @@ export type AppEnv = {
   s3Bucket: string;
   s3AccessKey: string;
   s3SecretKey: string;
-  mailApiUrl: string;
+  mail: MailConfig;
+  authRequestsPerMinute: number;
+  mailDailyLimit: number;
+  mailRecipientDailyLimit: number;
   verificationBaseUrl: string;
   maxUploadBytes: number;
   transientCapacityBytes: number;
@@ -25,15 +29,27 @@ export type AppEnv = {
 
 export function parseEnv(source: Record<string, string | undefined> = process.env): AppEnv {
   const nodeEnv = source.NODE_ENV === "production" ? "production" : source.NODE_ENV === "test" ? "test" : "development";
-  const groqApiKey = source.GROQ_API_KEY?.trim() ?? "";
-  if (nodeEnv === "production" && !groqApiKey) throw new Error("GROQ_API_KEY is required");
   const explicitS3PublicEndpoint = source.S3_PUBLIC_ENDPOINT?.trim();
   if (nodeEnv === "production" && !explicitS3PublicEndpoint) throw new Error("S3_PUBLIC_ENDPOINT is required in production");
   const s3PublicEndpoint = validateS3PublicEndpoint(explicitS3PublicEndpoint || source.S3_ENDPOINT || "http://127.0.0.1:9000");
 
+  const verificationBaseUrl = source.VERIFICATION_BASE_URL ?? "http://localhost:5173";
+  if (nodeEnv === "production") {
+    for (const [name, value] of [["VERIFICATION_BASE_URL", verificationBaseUrl], ["S3_PUBLIC_ENDPOINT", s3PublicEndpoint]]) {
+      let url: URL;
+      try { url = new URL(value); } catch { throw new Error(`${name} must be an HTTPS origin`); }
+      if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash || ["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error(`${name} must be a public HTTPS origin`);
+    }
+    for (const name of ["DATABASE_URL", "REDIS_URL", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"]) {
+      if (!source[name]?.trim()) throw new Error(`${name} is required in production`);
+    }
+    let database: URL;
+    try { database = new URL(source.DATABASE_URL!); }
+    catch { throw new Error("DATABASE_URL must be a valid database URL"); }
+    if (!database.password || source.S3_ACCESS_KEY === "minioadmin" || source.S3_SECRET_KEY === "minioadmin") throw new Error("production requires explicit database and storage credentials");
+  }
   return {
     nodeEnv,
-    groqApiKey,
     databaseUrl: source.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
     redisUrl: source.REDIS_URL ?? "redis://127.0.0.1:6379",
     s3Endpoint: source.S3_ENDPOINT ?? "http://127.0.0.1:9000",
@@ -42,8 +58,11 @@ export function parseEnv(source: Record<string, string | undefined> = process.en
     s3Bucket: source.S3_BUCKET ?? "videoanalyze",
     s3AccessKey: source.S3_ACCESS_KEY ?? "minioadmin",
     s3SecretKey: source.S3_SECRET_KEY ?? "minioadmin",
-    mailApiUrl: source.MAIL_API_URL ?? "http://127.0.0.1:8025/api/v1/send",
-    verificationBaseUrl: source.VERIFICATION_BASE_URL ?? "http://localhost:5173",
+    verificationBaseUrl: nodeEnv === "production" ? new URL(verificationBaseUrl).origin : verificationBaseUrl.replace(/\/$/, ""),
+    mail: parseMailConfig(source),
+    authRequestsPerMinute: positiveInteger(source.AUTH_REQUESTS_PER_MINUTE, 20),
+    mailDailyLimit: positiveInteger(source.MAIL_DAILY_LIMIT, 100),
+    mailRecipientDailyLimit: positiveInteger(source.MAIL_RECIPIENT_DAILY_LIMIT, 10),
     maxUploadBytes: positiveInteger(source.MAX_UPLOAD_BYTES, 2_000_000_000),
     transientCapacityBytes: positiveInteger(source.TEMP_MEDIA_CAPACITY_BYTES, 40_000_000_000),
     maxVideoDurationSeconds: positiveInteger(source.MAX_VIDEO_DURATION_SECONDS, 14_400),

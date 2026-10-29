@@ -10,6 +10,7 @@
     "dev": "corepack pnpm build && node scripts/dev.mjs",
     "build": "corepack pnpm -r build",
     "test:acceptance": "vitest run tests/acceptance",
+    "verify:docker": "node scripts/verify-docker-deployment.mjs",
     "verify:local-upload-analysis": "node scripts/verify-local-upload-analysis.mjs",
     "admin:create": "corepack pnpm --filter @videoanalyze/api admin:create",
     "db:migrate": "node --env-file-if-exists=.env apps/api/dist/db/migrate.js",

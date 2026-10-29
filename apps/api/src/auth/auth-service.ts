@@ -27,6 +27,7 @@ type AuthDependencies = {
       findVerification(tokenHash: string): Promise<{ id: string; userId: string; expiresAt: Date; usedAt: Date | null } | null>;
       markVerificationUsed(id: string, usedAt: Date): Promise<boolean>;
       createRegistrationCode(input: { email: string; codeHash: string; expiresAt: Date; createdAt: Date; rateLimitBefore: Date }): Promise<boolean>;
+      invalidateRegistrationCode(input: { email: string; codeHash: string; createdAt: Date }): Promise<void>;
       findRegistrationCode(email: string): Promise<{ id: string; email: string; codeHash: string; expiresAt: Date; usedAt: Date | null; attempts: number; createdAt: Date } | null>;
       incrementRegistrationAttempts(id: string, codeHash: string, now: Date): Promise<number>;
       markRegistrationCodeUsed(id: string, codeHash: string, usedAt: Date): Promise<boolean>;
@@ -35,6 +36,7 @@ type AuthDependencies = {
       revokeSession(tokenHash: string, revokedAt: Date): Promise<void>;
       createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: Date; createdAt?: Date; rateLimitBefore?: Date }): Promise<boolean>;
       findPasswordResetToken(tokenHash: string): Promise<{ id: string; userId: string; expiresAt: Date; usedAt: Date | null } | null>;
+      invalidatePasswordResetToken(tokenHash: string): Promise<void>;
       consumePasswordResetToken(id: string, usedAt: Date): Promise<boolean>;
       completePasswordReset(input: { tokenHash: string; passwordHash: string; now: Date }): Promise<boolean>;
     };
@@ -92,7 +94,13 @@ export function createAuthService(dependencies: AuthDependencies) {
       userId: user.id, tokenHash: hashOpaqueToken(token), expiresAt, createdAt: currentTime,
       ...(rateLimit ? { rateLimitBefore: new Date(currentTime.getTime() - 60_000) } : {})
     });
-    if (created) await dependencies.mailer.sendPasswordReset({ email: user.email, token, link: `${dependencies.resetBaseUrl ?? dependencies.verificationBaseUrl}/reset-password?token=${encodeURIComponent(token)}` });
+    if (created) {
+      try { await dependencies.mailer.sendPasswordReset({ email: user.email, token, link: `${dependencies.resetBaseUrl ?? dependencies.verificationBaseUrl}/reset-password?token=${encodeURIComponent(token)}` }); }
+      catch (error) {
+        await dependencies.repositories.auth.invalidatePasswordResetToken(hashOpaqueToken(token));
+        throw error;
+      }
+    }
     return { token, expiresAt };
   }
 
@@ -118,7 +126,12 @@ export function createAuthService(dependencies: AuthDependencies) {
         throw new DomainError("REGISTRATION_CODE_RATE_LIMITED", "registration code was sent too recently", 429);
       }
 
-      await dependencies.mailer.sendRegistrationCode({ email, code, expiresAt });
+      try { await dependencies.mailer.sendRegistrationCode({ email, code, expiresAt }); }
+      catch (error) {
+        // Expire only this delivery attempt. Keep created_at for the resend cooldown.
+        await dependencies.repositories.auth.invalidateRegistrationCode({ email, codeHash: hashOpaqueToken(code), createdAt: currentTime });
+        throw error;
+      }
       return { sent: true as const, expiresInSeconds: 600 as const };
     },
 

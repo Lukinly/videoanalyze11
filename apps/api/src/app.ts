@@ -35,8 +35,11 @@ export function buildApp(dependencies: {
   adminRepository?: ReturnType<typeof createAdminRepository>;
   videoDeletion?: { videos: { listOwnedObjectKeys(userId: string, videoId: string): Promise<string[] | null>; markDeleted(userId: string, videoId: string): Promise<void> }; storage: { delete(key: string): Promise<void> } };
   secureCookies?: boolean;
+  trustProxy?: number | boolean;
+  authOrigin?: string;
+  authRequestLimit?: (ip: string) => Promise<void>;
 }): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, trustProxy: dependencies.trustProxy ?? false });
 
   app.register(cookie);
   app.addHook("onSend", async (_request, reply) => {
@@ -54,7 +57,7 @@ export function buildApp(dependencies: {
     return reply.code(500).send({ code: "INTERNAL_ERROR", message: "internal server error" });
   });
 
-  app.register(async (instance) => registerAuthRoutes(instance, dependencies.authService, { secureCookies: dependencies.secureCookies }));
+  app.register(async (instance) => registerAuthRoutes(instance, dependencies.authService, { secureCookies: dependencies.secureCookies, origin: dependencies.authOrigin, requestLimit: dependencies.authRequestLimit }));
   if (dependencies.uploadService) {
     app.register(async (instance) => registerUploadRoutes(instance, { authService: dependencies.authService, uploadService: dependencies.uploadService! }));
   }
