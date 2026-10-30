@@ -76,7 +76,21 @@ dc ps
 dc exec api node dist/cli/mail-verify.js
 ```
 
-首次构建会下载 Node、Python 和媒体依赖。API 镜像不再安装仅 Worker 使用的 FFmpeg；数据库迁移、存储初始化和 API 复用同一镜像。镜像中不包含真实密钥或开发依赖。依赖下载站不可达时可以通过 Dockerfile 的 `APT_MIRROR`、`PIP_INDEX_URL`、Worker 的 `NPM_REGISTRY` 构建参数选择可访问的源。
+首次构建会下载 Node、Python 和媒体依赖。API 镜像不再安装仅 Worker 使用的 FFmpeg；数据库迁移、存储初始化和 API 复用同一镜像。镜像中不包含真实密钥或开发依赖。
+
+API 与 Worker 的 APT 默认使用清华 `mirrors.tuna.tsinghua.edu.cn`，pip 默认使用 `https://pypi.tuna.tsinghua.edu.cn/simple`，直接执行上述启动命令即可，无需重复传换源参数。APT 保留 Debian 签名校验，pip 保留 HTTPS 证书校验。清华安全更新镜像可能存在同步延迟。pip 源仅在 Python 安装阶段配置，调整它不会使之前的 Node 依赖安装和 APT 步骤缓存失效。
+
+清华的 Docker CE 软件源提供 Docker 安装包，不是 Docker Hub 镜像加速器；基础镜像拉取由服务器的 Docker 镜像加速配置负责。npm 保留原有配置（Worker 使用 `registry.npmmirror.com`）。参见[清华 Debian 帮助](https://mirrors.tuna.tsinghua.edu.cn/help/debian/)、[清华 PyPI 帮助](https://mirrors.tuna.tsinghua.edu.cn/help/pypi/)和[清华 Docker CE 帮助](https://mirrors.tuna.tsinghua.edu.cn/help/docker-ce/)。
+
+如果部署地区不适合清华源，可按需覆盖构建参数，例如切回上游：
+
+```bash
+dc build --build-arg APT_MIRROR=deb.debian.org \
+  --build-arg PIP_INDEX_URL=https://pypi.org/simple api worker
+dc up -d --no-build --wait --wait-timeout 180
+```
+
+`APT_MIRROR` 只填主机名，`PIP_INDEX_URL` 填完整 HTTPS 地址；Worker 还支持 `NPM_REGISTRY` 构建参数。用自定义源构建后使用 `--no-build` 启动，避免再次按默认源构建。
 
 邮件预检验证 DNS、TCP、TLS 和账号认证，不发邮件，也不证明最终收件箱送达。此后访问正式网页，用自己控制的收件邮箱走一次获取验证码、注册、登录、找回密码流程，检查收件箱与垃圾邮件。
 

@@ -1,8 +1,6 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /workspace
 RUN corepack enable
-ARG PIP_INDEX_URL=https://pypi.org/simple
-ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/worker/package.json apps/worker/package.json
@@ -22,10 +20,8 @@ RUN node scripts/materialize-workspace-package.mjs /workspace/deploy @videoanaly
 
 FROM node:24-bookworm-slim
 WORKDIR /app
-ARG APT_MIRROR=deb.debian.org
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
 ARG TARGETARCH
-ARG PIP_INDEX_URL=https://pypi.org/simple
-ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-retries
 RUN --mount=type=cache,id=videoanalyze-apt-${TARGETARCH},target=/var/cache/apt,sharing=locked \
@@ -36,6 +32,8 @@ RUN --mount=type=cache,id=videoanalyze-apt-${TARGETARCH},target=/var/cache/apt,s
       /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked pip3 install --timeout 60 --retries 3 --break-system-packages yt-dlp==2026.7.4 bilibili-cli==0.6.2
 COPY --from=build /workspace/deploy ./
 COPY --from=build /workspace/apps/api/dist ./dist
