@@ -1,10 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { DomainError } from "@videoanalyze/domain";
+import { DomainError, emailSchema, WELCOME_CREDITS } from "@videoanalyze/domain";
 import type { AuthServiceContract } from "./auth.js";
 import { requireAdmin } from "../auth/authorization.js";
 import type { AdminTopupRecord } from "../db/repositories/admin.js";
+import type { UserRecord } from "../db/repositories/users.js";
+import { hashPassword } from "../auth/passwords.js";
 
 type AdminRoutesDependencies = {
+  origin?: string;
+  createUserLimit?: (ip: string) => Promise<void>;
   authService: AuthServiceContract & { requestPasswordReset?: (userId: string) => Promise<{ token: string; expiresAt: Date }> };
   users: {
     list(input: { search?: string; status?: "active" | "suspended"; limit?: number; offset?: number }): Promise<Array<{ id: string; email: string; emailVerifiedAt: Date | null; role: "user" | "admin"; status: "active" | "suspended"; mustChangePassword: boolean }>>;
@@ -18,6 +22,7 @@ type AdminRoutesDependencies = {
     listLedger(userId: string, limit?: number): Promise<unknown[]>;
   };
   adminRepository: {
+    createUser(input: { email: string; passwordHash: string; adminUserId: string; reason: string }): Promise<UserRecord>;
     listTopups(input?: { status?: "pending" | "approved" | "rejected"; limit?: number; offset?: number }): Promise<AdminTopupRecord[]>;
     approveTopup(input: { requestId: string; adminUserId: string; reviewNote: string }): Promise<unknown>;
     rejectTopup(input: { requestId: string; adminUserId: string; reviewNote: string }): Promise<unknown>;
@@ -28,6 +33,35 @@ type AdminRoutesDependencies = {
 };
 
 export async function registerAdminRoutes(app: FastifyInstance, dependencies: AdminRoutesDependencies) {
+  app.addHook("onRequest", async (request) => {
+    if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && dependencies.origin && request.headers.origin && request.headers.origin !== dependencies.origin) {
+      throw new DomainError("FORBIDDEN", "request origin is not allowed", 403);
+    }
+  });
+
+  app.post<{ Body: unknown }>("/api/admin/users", async (request, reply) => {
+    const admin = await requireAdmin(request, dependencies.authService);
+    const body = request.body as Record<string, unknown> | null;
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !["email", "password", "confirmPassword", "reason"].includes(key))) {
+      throw new DomainError("INVALID_CREDENTIALS", "请填写邮箱、初始密码和确认密码", 400);
+    }
+    const email = emailSchema.safeParse(body.email);
+    if (!email.success) throw new DomainError("INVALID_CREDENTIALS", "请输入有效的邮箱地址", 400);
+    if (typeof body.password !== "string" || body.password.length < 8 || Buffer.byteLength(body.password, "utf8") > 72 || typeof body.confirmPassword !== "string") {
+      throw new DomainError("INVALID_CREDENTIALS", "初始密码至少 8 位，且不能超过 72 个 UTF-8 字节", 400);
+    }
+    if (body.password !== body.confirmPassword) throw new DomainError("PASSWORD_MISMATCH", "两次输入的密码不一致", 400);
+    if (body.reason !== undefined && (typeof body.reason !== "string" || body.reason.length > 500)) throw new DomainError("INVALID_REASON", "创建原因不能超过 500 字", 400);
+    await dependencies.createUserLimit?.(request.ip);
+    const user = await dependencies.adminRepository.createUser({
+      email: email.data,
+      passwordHash: await hashPassword(body.password),
+      adminUserId: admin.id,
+      reason: (body.reason as string | undefined)?.trim() || "管理员手动创建普通账号"
+    });
+    return reply.code(201).send({ user: publicUser(user), welcomeCredits: WELCOME_CREDITS });
+  });
+
   app.get<{ Querystring: { search?: string; status?: "active" | "suspended"; limit?: string; offset?: string } }>("/api/admin/users", async (request, reply) => {
     await requireAdmin(request, dependencies.authService);
     const users = await dependencies.users.list({ search: request.query.search, status: request.query.status, limit: pageSize(request.query.limit), offset: offset(request.query.offset) });

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { DomainError } from "@videoanalyze/domain";
+import { DomainError, WELCOME_CREDITS } from "@videoanalyze/domain";
 import type { Pool } from "pg";
 import { createCreditRepository } from "./credits.js";
+import { createUserRepository } from "./users.js";
 
 export type TopupRecord = {
   id: string;
@@ -35,7 +36,36 @@ const topupColumns = `id, user_id AS "userId", requested_amount AS "requestedAmo
 
 export function createAdminRepository(pool: Pool) {
   const credits = createCreditRepository(pool);
+  const users = createUserRepository(pool);
   return {
+    async createUser(input: { email: string; passwordHash: string; adminUserId: string; reason: string }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const user = await users.create({
+          email: input.email,
+          passwordHash: input.passwordHash,
+          role: "user",
+          status: "active",
+          emailVerifiedAt: new Date(),
+          mustChangePassword: true,
+          client
+        });
+        await credits.grant({ client, userId: user.id, amount: WELCOME_CREDITS, type: "welcome_grant", idempotencyKey: `welcome:${user.id}`, reason: "admin_created", createdBy: input.adminUserId });
+        await insertAudit(client, { adminUserId: input.adminUserId, action: "create_user", targetUserId: user.id, metadata: { email: user.email }, reason: input.reason });
+        await client.query("COMMIT");
+        return user;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        if (error && typeof error === "object" && "code" in error && error.code === "23505") {
+          throw new DomainError("EMAIL_ALREADY_REGISTERED", "该邮箱已存在，请使用其他邮箱", 409);
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
     async createTopup(input: { userId: string; requestedAmount: number; note: string }): Promise<TopupRecord> {
       if (!Number.isSafeInteger(input.requestedAmount) || input.requestedAmount <= 0) throw new DomainError("INVALID_CREDIT_REQUEST", "requested amount must be a positive integer", 400);
       const result = await pool.query<TopupRecord>(

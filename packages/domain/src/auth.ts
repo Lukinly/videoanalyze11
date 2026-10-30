@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const WELCOME_CREDITS = 12;
+
 export const emailSchema = z.string().trim().toLowerCase().email().max(320);
 
 export const publicUserSchema = z.object({

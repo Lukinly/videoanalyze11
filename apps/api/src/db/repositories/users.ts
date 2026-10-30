@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DomainError } from "@videoanalyze/domain";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 export type UserRecord = {
   id: string;
@@ -23,9 +23,10 @@ export function createUserRepository(pool: Pool) {
       status?: "active" | "suspended";
       mustChangePassword?: boolean;
       emailVerifiedAt?: Date | null;
+      client?: PoolClient;
     }): Promise<UserRecord> {
       const now = new Date();
-      const result = await pool.query<UserRecord>(
+      const result = await (input.client ?? pool).query<UserRecord>(
         `INSERT INTO users (id, email, password_hash, email_verified_at, role, status, must_change_password, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
          RETURNING id, email, password_hash AS "passwordHash", email_verified_at AS "emailVerifiedAt",

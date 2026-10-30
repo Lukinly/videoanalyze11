@@ -90,7 +90,7 @@ export function buildApp(dependencies: {
     app.register(async (instance) => registerCreditRoutes(instance, { authService: dependencies.authService, credits: dependencies.credits!, topups: dependencies.topups! }));
   }
   if (dependencies.credits && dependencies.users && dependencies.adminRepository) {
-    app.register(async (instance) => registerAdminRoutes(instance, { authService: dependencies.authService, credits: dependencies.credits!, users: dependencies.users!, adminRepository: dependencies.adminRepository! }));
+    app.register(async (instance) => registerAdminRoutes(instance, { authService: dependencies.authService, credits: dependencies.credits!, users: dependencies.users!, adminRepository: dependencies.adminRepository!, origin: dependencies.authOrigin, createUserLimit: dependencies.authRequestLimit }));
   }
   return app;
 }

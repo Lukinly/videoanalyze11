@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { emailSchema, DomainError, publicUserSchema, type PublicUser } from "@videoanalyze/domain";
+import { emailSchema, DomainError, publicUserSchema, WELCOME_CREDITS, type PublicUser } from "@videoanalyze/domain";
 import { hashPassword, verifyPassword } from "./passwords.js";
 import { createOpaqueToken, hashOpaqueToken } from "./tokens.js";
 
@@ -162,7 +162,7 @@ export function createAuthService(dependencies: AuthDependencies) {
       if (existing && !existing.emailVerifiedAt) await dependencies.repositories.users.markEmailVerified(existing.id, now());
       await dependencies.repositories.credits.grant({
         userId: user.id,
-        amount: 12,
+        amount: WELCOME_CREDITS,
         type: "welcome_grant",
         idempotencyKey: `welcome:${user.id}`,
         reason: "email_verified"
@@ -183,7 +183,7 @@ export function createAuthService(dependencies: AuthDependencies) {
 
       await dependencies.repositories.credits.grant({
         userId: verification.userId,
-        amount: 12,
+        amount: WELCOME_CREDITS,
         type: "welcome_grant",
         idempotencyKey: `welcome:${verification.userId}`,
         reason: "email_verified"

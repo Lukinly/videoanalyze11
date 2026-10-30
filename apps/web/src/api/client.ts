@@ -138,6 +138,7 @@ export const api = {
   createCreditRequest: (input: { requestedAmount: number; note: string }) => request<CreditTopupRequest>("/api/credit-requests", { method: "POST", body: JSON.stringify(input) }),
   getCreditRequests: () => request<{ items: CreditTopupRequest[] }>("/api/credit-requests"),
   listAdminUsers: (input: { search?: string; status?: string } = {}) => request<{ items: AdminUser[] }>(`/api/admin/users?${new URLSearchParams(input).toString()}`),
+  createAdminUser: (input: { email: string; password: string; confirmPassword: string; reason?: string }) => request<{ user: PublicUser; welcomeCredits: number }>("/api/admin/users", { method: "POST", body: JSON.stringify(input) }),
   getAdminUser: (id: string) => request<{ user: PublicUser; balance: CreditBalance; ledger: CreditLedgerEntry[] }>(`/api/admin/users/${encodeURIComponent(id)}`),
   changeAdminRole: (id: string, input: { role: "user" | "admin"; reason: string }) => request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/role`, { method: "PATCH", body: JSON.stringify(input) }),
   changeAdminStatus: (id: string, input: { status: "active" | "suspended"; reason: string }) => request<{ ok: true }>(`/api/admin/users/${encodeURIComponent(id)}/status`, { method: "PATCH", body: JSON.stringify(input) }),

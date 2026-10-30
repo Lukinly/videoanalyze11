@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { verifyPassword } from "../auth/passwords.js";
 
 describe("admin routes", () => {
   const authService = {
@@ -18,6 +19,7 @@ describe("admin routes", () => {
     setMustChangePassword: vi.fn()
   };
   const adminRepository = {
+    createUser: vi.fn().mockResolvedValue({ id: "created_1", email: "new@example.com", passwordHash: "private-hash", emailVerifiedAt: new Date("2026-10-30T00:00:00Z"), role: "user", status: "active", mustChangePassword: true }),
     createTopup: vi.fn(),
     listTopups: vi.fn().mockResolvedValue([]),
     approveTopup: vi.fn().mockResolvedValue({ id: "request_1", status: "approved" }),
@@ -26,16 +28,64 @@ describe("admin routes", () => {
     createAudit: vi.fn().mockResolvedValue(undefined),
     listAudit: vi.fn().mockResolvedValue([])
   };
+  const requestLimit = vi.fn().mockResolvedValue(undefined);
   let app: { inject: (options: { method: string; url: string; headers?: Record<string, string>; payload?: unknown }) => Promise<{ statusCode: number; json: () => unknown }>; close: () => Promise<void> };
 
   beforeAll(async () => {
     const { buildApp } = await import("../app.js");
-    app = buildApp({ authService, credits, users, adminRepository }) as typeof app;
+    app = buildApp({ authService, credits, users, adminRepository, authOrigin: "https://app.example.com", authRequestLimit: requestLimit }) as typeof app;
     await (app as unknown as { ready: () => Promise<void> }).ready();
   }, 30_000);
 
   afterAll(async () => {
     await app.close();
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authService.authenticate.mockResolvedValue({ id: "admin_1", role: "admin", status: "active" });
+  });
+
+  it("creates only a normal user, normalizes email and hashes the password without returning credentials", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/admin/users", headers: { cookie: "video_session=admin-session", origin: "https://app.example.com" }, payload: { email: " New@Example.com ", password: "initial password", confirmPassword: "initial password", reason: "support request" } });
+    expect(response.statusCode).toBe(201);
+    const input = adminRepository.createUser.mock.calls[0][0];
+    expect(input).toMatchObject({ email: "new@example.com", adminUserId: "admin_1", reason: "support request" });
+    expect(await verifyPassword("initial password", input.passwordHash)).toBe(true);
+    expect(input.passwordHash).not.toBe("initial password");
+    expect(requestLimit).toHaveBeenCalledOnce();
+    expect(response.json()).toEqual({ user: { id: "created_1", email: "new@example.com", emailVerifiedAt: "2026-10-30T00:00:00.000Z", role: "user", status: "active", mustChangePassword: true }, welcomeCredits: 12 });
+  });
+
+  it.each([
+    [undefined, undefined, 401],
+    ["user", "active", 403],
+    ["admin", "suspended", 403]
+  ])("rejects creation by role %s with status %s", async (role, status, expected) => {
+    authService.authenticate.mockResolvedValue({ id: "actor", role, status });
+    const response = await app.inject({ method: "POST", url: "/api/admin/users", headers: role ? { cookie: "video_session=session" } : {}, payload: { email: "new@example.com", password: "initial password", confirmPassword: "initial password" } });
+    expect(response.statusCode).toBe(expected);
+    expect(adminRepository.createUser).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { email: "invalid" },
+    { password: "short", confirmPassword: "short" },
+    { confirmPassword: "different password" },
+    { password: "中".repeat(25), confirmPassword: "中".repeat(25) },
+    { role: "admin" },
+    { welcomeCredits: 9999 },
+    { reason: "x".repeat(501) }
+  ])("rejects invalid or privilege-changing input %j", async (invalid) => {
+    const response = await app.inject({ method: "POST", url: "/api/admin/users", headers: { cookie: "video_session=session" }, payload: { email: "new@example.com", password: "initial password", confirmPassword: "initial password", ...invalid } });
+    expect(response.statusCode).toBe(400);
+    expect(adminRepository.createUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-origin administrator request before creating a user", async () => {
+    const response = await app.inject({ method: "POST", url: "/api/admin/users", headers: { cookie: "video_session=session", origin: "https://other.example.com" }, payload: { email: "new@example.com", password: "initial password", confirmPassword: "initial password" } });
+    expect(response.statusCode).toBe(403);
+    expect(adminRepository.createUser).not.toHaveBeenCalled();
   });
 
   it("denies a normal user from the administrator API", async () => {
