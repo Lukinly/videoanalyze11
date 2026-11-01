@@ -118,7 +118,7 @@ export function App() {
 
 function HomePage({ user, credits, history, onLogin, onLogout, onUploaded, onLinked }: { user: PublicUser | null; credits: CreditBalance | null; history: AnalysisRun[]; onLogin: () => void; onLogout: () => void; onUploaded: (video: UploadedVideo) => void | Promise<void>; onLinked: (preview: LinkPreview & { videoId: string }) => Promise<void> }) {
   const [sourceMode, setSourceMode] = useState<"upload" | "link">("upload");
-  return <main className={`app-shell home-shell${user ? "" : " public-home"}`}>
+  return <main className={`app-shell home-shell${user ? " member-home" : " public-home"}`}>
     {!user && <div className="public-announcement">从观看到理解，让知识留下来。<a href="#start-analysis">开始体验 <span aria-hidden="true">↗</span></a></div>}
     <header className="topbar"><Brand />{!user && <nav className="public-nav" aria-label="首页导航"><a href="#product-preview">产品预览</a><a href="#features">功能亮点</a><a href="#start-analysis">开始使用</a></nav>}{user ? <div className="user-menu"><span className="credit-badge">{credits ? `${credits.available} 积分可用` : "积分加载中"}</span>{user.role === "admin" && <a className="text-button" href="/admin">后台</a>}<span>{user.email}</span><a className="account-link" href="/account">个人中心</a><button className="text-button" type="button" onClick={onLogout}>退出</button></div> : <div className="public-nav-actions"><button className="public-login-button" type="button" onClick={onLogin}>登录</button><a className="primary-button" href="#start-analysis">开始生成笔记 <span aria-hidden="true">↗</span></a></div>}</header>
     <div className="home-content">
