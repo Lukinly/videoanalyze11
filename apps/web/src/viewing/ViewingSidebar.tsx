@@ -31,6 +31,7 @@ export function ViewingSidebar({ run, currentTime, onSeek }: ViewingSidebarProps
         }]
   )), [run?.summary?.chapters]);
   const segments = run?.transcript?.segments ?? [];
+  const stopped = run?.status === "failed" || run?.status === "cancelled";
   const activeChapterId = findActiveTimedItem(chapters, currentTime)?.id;
   const activeSegmentId = findActiveTimedItem(segments, currentTime)?.id;
   const activeFollowId = tab === "chapters" ? activeChapterId : activeSegmentId;
@@ -60,9 +61,9 @@ export function ViewingSidebar({ run, currentTime, onSeek }: ViewingSidebarProps
         <button aria-selected={tab === "chapters"} className={tab === "chapters" ? "is-active" : undefined} role="tab" type="button" onClick={() => setTab("chapters")}>章节笔记</button>
         <button aria-selected={tab === "transcript"} className={tab === "transcript" ? "is-active" : undefined} role="tab" type="button" onClick={() => setTab("transcript")}>逐字稿</button>
       </div>
-      <SearchPanel runId={run?.id} onSeek={onSeek} />
+      {!stopped && <SearchPanel runId={run?.id} onSeek={onSeek} />}
       <div className="viewing-scroll" ref={viewportRef} onScroll={pauseFollow}>
-        {tab === "chapters" ? <>
+        {stopped ? <section className="summary-panel"><h2>{run?.status === "failed" ? "分析未完成" : "分析已取消"}</h2><p>本次分析已停止，暂无完整{tab === "chapters" ? "摘要和章节" : "逐字稿"}可查看。</p></section> : tab === "chapters" ? <>
           <SummaryPanel oneLineSummary={run?.summary?.oneLineSummary} overallSummary={run?.summary?.overallSummary} />
           <ChapterList chapters={chapters} activeChapterId={activeChapterId} onSeek={onSeek} />
         </> : <TranscriptPanel segments={segments} activeSegmentId={activeSegmentId} onSeek={onSeek} />}

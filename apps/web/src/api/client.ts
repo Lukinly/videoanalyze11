@@ -32,6 +32,7 @@ export type AnalysisRun = {
   progress?: number;
   completedChunks?: number;
   totalChunks?: number;
+  failure?: { code: string; message: string };
   fileName?: string;
   duration?: number | null;
   retentionMode?: RetentionMode;

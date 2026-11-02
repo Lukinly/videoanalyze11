@@ -44,10 +44,15 @@ export function createResultService(input: { repository: ResultRepository; clock
   };
 }
 
-function publicMetadata<T extends { error?: unknown }>(run: T): Omit<T, "error"> {
+function publicMetadata<T extends { error?: unknown; status?: string; stage?: string }>(run: T): Omit<T, "error"> & { failure?: { code: string; message: string } } {
   const safe = { ...run };
   delete safe.error;
-  return safe;
+  if (run.status !== "failed") return safe;
+  const asrAccessDenied = run.stage === "transcribing" && typeof run.error === "string" && /^provider request failed with status 403:/.test(run.error);
+  return { ...safe, failure: asrAccessDenied
+    ? { code: "ASR_ACCESS_DENIED", message: "语音识别服务拒绝了请求，请联系管理员检查服务权限和网络配置。" }
+    : { code: "ANALYSIS_FAILED", message: "本次分析失败，未生成完整结果。" }
+  };
 }
 
 export type ResultService = ReturnType<typeof createResultService>;

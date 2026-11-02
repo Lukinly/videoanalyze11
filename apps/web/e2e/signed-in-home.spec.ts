@@ -56,6 +56,34 @@ test("keeps the signed-in upload form readable and starts an analysis with the s
   expect(errors).toEqual([]);
 });
 
+test("updates the entire workspace and credit balance when transcription fails", async ({ page }) => {
+  await mockMemberHome(page);
+  let creditReads = 0;
+  const message = "语音识别服务拒绝了请求，请联系管理员检查服务权限和网络配置。";
+  await page.route("**/api/credits", (route) => {
+    creditReads += 1;
+    return route.fulfill({ json: { ledgerBalance: 12, held: 0, available: 12 } });
+  });
+  await page.route("**/api/analysis-runs/new-run", (route) => route.fulfill({ json: {
+    id: "new-run", videoId: "uploaded-video", status: "failed", stage: "transcribing", progress: 0.2,
+    retentionMode: "standard", resultAvailability: "pending", failure: { code: "ASR_ACCESS_DENIED", message }
+  } }));
+  await page.goto("/");
+  await expect(page.getByText("reader@example.test", { exact: true })).toBeVisible();
+  await expect.poll(() => creditReads).toBeGreaterThan(0);
+  const initialCreditReads = creditReads;
+  await page.getByLabel("选择用于分析的视频").setInputFiles({ name: "lesson.mp4", mimeType: "video/mp4", buffer: Buffer.from("test video") });
+  await page.getByRole("button", { name: "上传并分析" }).click();
+  await expect(page.getByText("AI 分析失败", { exact: true })).toBeVisible();
+  await expect(page.getByText(message, { exact: true })).toBeVisible();
+  await expect(page.getByText("AI 正在分析视频内容", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("分析结果将自动更新", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("等待摘要", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "返回工作台" })).toHaveAttribute("href", "/");
+  await expect.poll(() => creditReads).toBeGreaterThan(initialCreditReads);
+  await page.screenshot({ path: resolve(".local/screenshots/failed-workspace-desktop.png"), fullPage: true });
+});
+
 for (const width of [1024, 768, 390]) {
   test(`keeps signed-in upload and link controls usable at ${width}px`, async ({ page }) => {
     const calls = await mockMemberHome(page);

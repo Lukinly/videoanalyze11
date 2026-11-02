@@ -152,6 +152,16 @@ dc exec -T api python3 /app/scripts/bilibili-metadata.py BV1TLR1BGEh7
 
 本机成功不代表服务器的公网出口同样可用。若上述脚本在服务器仍返回 412，说明库的请求也受到平台限制；保留直连配置，使用本地视频上传，或在平台限制解除后再试。不要反复点击读取或批量重试。
 
+### Groq 转写阶段返回 HTTP 403
+
+若失败记录停留在 `transcribing` / 20%，且内部错误为 `provider request failed with status 403`，需要核查语音服务的访问权限。B 站官方播放器可播放不代表服务器的 Groq 请求成功；GitHub SSH 443 通道也只用于 Git 操作，不转发 Groq 请求。
+
+Groq 的 [403 说明](https://console.groq.com/docs/errors)表示访问受权限限制；[组织和项目模型权限](https://console.groq.com/docs/model-permissions)也可能拒绝请求。若同一容器携带现有密钥访问 `GET https://api.groq.com/openai/v1/models` 仍返回 `403 {"error":{"message":"Forbidden"}}`，说明拒绝不只发生在音频上传。仅凭这个响应无法确定密钥是否有效，也不能直接断定是地区限制。
+
+保留当前 Groq 配置，先在控制台核对实际项目与 `whisper-large-v3-turbo` 的组织、项目权限。向 Groq 支持提交复现的 UTC 时间、响应 `Date`、`cf-ray` / 请求 ID、服务器预期公网出口 IP、模型及两个接口的状态码，请其核查账号资格、IP/地区政策或边缘规则。不要发送完整 API key 或 Authorization 请求头。支持入口参见 [Groq 官方文档](https://console.groq.com/docs/billing-faqs)；是否有控制台聊天支持取决于账号套餐。
+
+页面会把此类转写 403 显示为固定的“语音识别服务拒绝了请求”提示，不返回内部服务响应；失败和取消会同步停止顶部、侧栏的等待提示，并刷新积分读数。该显示修复不会解除服务商的访问拒绝。服务恢复后重新发起任务，已有失败任务不会自动重跑。
+
 ## 4. 管理员与日常操作
 
 创建尚未注册过的管理员邮箱，按终端提示输入密码：

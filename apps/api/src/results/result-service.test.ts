@@ -46,4 +46,19 @@ describe("result service lifecycle", () => {
 
     expect(history.items[0]).not.toHaveProperty("error");
   });
+
+  it("returns a fixed ASR access message without exposing the provider response", async () => {
+    const metadata = { id: "failed", status: "failed", stage: "transcribing", error: 'provider request failed with status 403: {"error":{"message":"Forbidden secret-sentinel"}}', retentionMode: "standard" as const, resultExpiresAt: null, resultsDeletedAt: null };
+    const repository = { findOwnedMetadata: vi.fn().mockResolvedValue(metadata), listOwned: vi.fn().mockResolvedValue([metadata]), loadOwnedContent: vi.fn(), deleteOwnedResults: vi.fn() };
+    const service = createResultService({ repository });
+    const detail = await service.get({ userId: "u1", runId: "failed" });
+    const history = await service.list({ userId: "u1", limit: 50 });
+    expect(detail).toMatchObject({ failure: { code: "ASR_ACCESS_DENIED", message: expect.stringContaining("语音识别服务拒绝") } });
+    expect(history.items[0]).toMatchObject({ failure: detail.failure });
+    expect(detail).not.toHaveProperty("error");
+    expect(JSON.stringify([detail, history])).not.toContain("secret-sentinel");
+    expect(repository.loadOwnedContent).not.toHaveBeenCalled();
+    repository.findOwnedMetadata.mockResolvedValue({ ...metadata, stage: "summarizing" });
+    await expect(service.get({ userId: "u1", runId: "failed" })).resolves.toMatchObject({ failure: { code: "ANALYSIS_FAILED" } });
+  });
 });

@@ -4,9 +4,10 @@ import { api, subscribeToAnalysis, type AnalysisRun } from "../api/client";
 type AnalysisProgressProps = {
   runId?: string;
   onCompleted?: (run: AnalysisRun) => void;
+  onTerminal?: (run: AnalysisRun) => void;
 };
 
-export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) {
+export function AnalysisProgress({ runId, onCompleted, onTerminal }: AnalysisProgressProps) {
   const [run, setRun] = useState<AnalysisRun | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -14,6 +15,8 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
 
   const onCompletedRef = useRef(onCompleted);
   useEffect(() => { onCompletedRef.current = onCompleted; }, [onCompleted]);
+  const onTerminalRef = useRef(onTerminal);
+  useEffect(() => { onTerminalRef.current = onTerminal; }, [onTerminal]);
 
   useEffect(() => {
     if (!runId) {
@@ -25,7 +28,7 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
     let disposed = false;
     let pollingStopped = false;
     let refreshing = false;
-    let completed = false;
+    let terminalNotified = false;
     let unsubscribe: () => void = () => undefined;
     setRun(null);
     setCancelError(null);
@@ -42,10 +45,11 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
           pollingStopped = true;
           unsubscribe();
           setConnectionState("任务已结束");
-        }
-        if (current.status === "completed" && !completed) {
-          completed = true;
-          onCompletedRef.current?.(current);
+          if (!terminalNotified) {
+            terminalNotified = true;
+            onTerminalRef.current?.(current);
+            if (current.status === "completed") onCompletedRef.current?.(current);
+          }
         }
       } catch {
         if (!disposed) setConnectionState("无法读取任务状态");
@@ -94,7 +98,7 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
   }
 
   const progress = Math.min(1, Math.max(0, run?.progress ?? 0));
-  const chunkText = run?.totalChunks ? `${run.completedChunks ?? 0} / ${run.totalChunks} 音频块` : "准备音频处理";
+  const chunkText = run?.totalChunks ? `${run.completedChunks ?? 0} / ${run.totalChunks} 音频块` : run?.status === "failed" || run?.status === "cancelled" ? "任务已停止" : run?.stage === "transcribing" ? "语音识别" : "准备音频处理";
   return (
     <section className="progress-card" aria-live="polite">
       <div className="section-heading">
@@ -111,7 +115,7 @@ export function AnalysisProgress({ runId, onCompleted }: AnalysisProgressProps) 
       <div className="progress-meta"><span>{Math.round(progress * 100)}%</span><span>{chunkText}</span></div>
       <p className="connection-state">{connectionState}</p>
       {cancelError && <p className="error-text">{cancelError}</p>}
-      {run?.status === "failed" && <p className="error-text">分析失败，请稍后重试。</p>}
+      {run?.status === "failed" && <p className="error-text">{run.failure?.message ?? "本次分析失败，未生成完整结果。"}</p>}
     </section>
   );
 }

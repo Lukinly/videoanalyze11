@@ -103,11 +103,11 @@ export function App() {
     void api.listAnalyses().then((result) => setHistory(result.items));
   }
 
-  const completed = (completedRun: AnalysisRun) => { setRun(completedRun); void api.getCredits().then(setCredits); };
+  const finished = (terminalRun: AnalysisRun) => { setRun(terminalRun); void api.getCredits().then(setCredits); };
 
   return <>
     {video && user
-      ? <WatchingWorkspace user={user} credits={credits} video={video} run={run} playerRef={playerRef} onLogout={logout} onCompleted={completed} onAttach={(url, fileName) => setVideo((current) => current ? { ...current, playbackUrl: url, fileName } : current)} onDeleted={() => { setVideo(null); setRun(null); window.history.replaceState({}, "", "/"); void api.listAnalyses().then((result) => setHistory(result.items)); }} />
+      ? <WatchingWorkspace user={user} credits={credits} video={video} run={run} playerRef={playerRef} onLogout={logout} onTerminal={finished} onAttach={(url, fileName) => setVideo((current) => current ? { ...current, playbackUrl: url, fileName } : current)} onDeleted={() => { setVideo(null); setRun(null); window.history.replaceState({}, "", "/"); void api.listAnalyses().then((result) => setHistory(result.items)); }} />
       : <HomePage user={user} credits={credits} history={history} onLogin={showLogin} onLogout={logout} onUploaded={handleUploaded} onLinked={handleLinked} />}
     {authOpen && (!user || authView === "forgot") && <AuthDialog view={authView} onViewChange={(view) => { setAuthNotice(undefined); setAuthView(view); }} onClose={() => { setAuthOpen(false); if (window.location.pathname !== "/" || window.location.search) window.history.replaceState({}, "", "/"); }}>
       {authView === "login" ? <LoginPage embedded notice={authNotice} onForgotPassword={showForgotPassword} onSuccess={(loggedIn) => { setAuthNotice(undefined); setAuthOpen(false); void restoreSession(loggedIn); }} onRegister={() => { setAuthNotice(undefined); setAuthView("register"); }} />

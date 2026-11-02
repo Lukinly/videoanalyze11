@@ -36,6 +36,27 @@ describe("AnalysisProgress", () => {
     expect(screen.getByText("处理中")).toBeVisible();
     expect(screen.getByText("0 / 1 音频块")).toBeVisible();
   });
+
+  it.each(["failed", "cancelled"])("notifies the workspace once and stops polling when the persisted run is %s", async (status) => {
+    vi.useFakeTimers();
+    const terminal = { id: "run_1", videoId: "video_1", status, stage: "transcribing", progress: 0.2 };
+    getAnalysis.mockResolvedValueOnce({ ...terminal, status: "running" }).mockResolvedValue(terminal);
+    const onTerminal = vi.fn();
+    const onCompleted = vi.fn();
+    const close = vi.fn();
+    subscribeToAnalysis.mockReturnValueOnce(close);
+    const { AnalysisProgress } = await import("./AnalysisProgress");
+    const view = render(<AnalysisProgress runId="run_1" onCompleted={onCompleted} onTerminal={onTerminal} />);
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(onTerminal).toHaveBeenCalledExactlyOnceWith(terminal);
+    expect(onCompleted).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(screen.getByText("任务已停止")).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(getAnalysis).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
 });
 
 it("loads full results once on completion and keeps one stream across callback changes", async () => {
