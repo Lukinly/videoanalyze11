@@ -100,6 +100,38 @@ Garage 在私有 tmpfs 中保存权限为 0600 的 RPC 密钥副本，兼容只�
 
 认证限流使用现有 Redis，多个 API 实例共享预算，不另起邮件队列。Redis 不可用时相关认证请求返回 503，避免限流失效后继续发信。生产 API 只信任直接反向代理这一跳的客户端地址；不要把 API 3000 端口单独暴露出去。
 
+### 服务器直连，不依赖本地梯子
+
+生产 Compose 为所有服务明确清空大小写 HTTP、HTTPS、ALL、FTP 代理变量，并禁用 Node 环境代理；Worker 的专用代理变量也为空。Docker 客户端可能自动向新容器和构建注入代理，因此还需清除服务器自己的配置。这里的出站代理与 Caddy 网站反向代理不同，保留 Caddy 服务及其 80/443 端口。
+
+以下命令在 Ubuntu **服务器**执行，不在本机执行。先退出当前终端的出站代理：
+
+```bash
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY FTP_PROXY http_proxy https_proxy all_proxy ftp_proxy
+unset NODE_USE_ENV_PROXY WORKER_HTTP_PROXY WORKER_HTTPS_PROXY
+export NO_PROXY='*' no_proxy='*'
+```
+
+清理脚本会校验 Docker 配置，备份并删除守护进程及普通用户、sudo 用户客户端 JSON 配置中的 `proxies` 字段，保留镜像源、认证及其他配置；备份仅 root 可读。它通过 systemd 的 `UnsetEnvironment` 取消遗留代理环境，并重启 Docker。重启可能短暂中断此服务器上的容器，不删除数据卷。
+
+```bash
+sudo bash scripts/disable-server-proxy.sh "${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+dc config --quiet
+dc up -d --no-build --force-recreate --wait --wait-timeout 180
+```
+
+若 Docker 的 `ExecStart` 中手动加过 `--http-proxy` / `--https-proxy`，脚本会在修改前退出，需要从原服务配置移除这些参数后重试。脚本针对标准 Ubuntu Docker Engine；独立 BuildKit、VPN/TUN 或 SSH 代理隧道需在相应服务中取消。重新登录终端后若代理变量再次出现，还需删除服务器 shell 启动文件中相应的 `export` 配置。已有模型地址若指向本地隧道，还需改成可从服务器直连的服务地址。
+
+验证容器没有非空出站代理，并检查真实 HTTPS 直连。以下请求不带 API 密钥，不打印配置值；返回 401/403/404 仍说明建立了 HTTPS 连接，不代表模型调用成功：
+
+```bash
+dc exec -T worker sh -c 'for key in HTTP_PROXY HTTPS_PROXY ALL_PROXY FTP_PROXY http_proxy https_proxy all_proxy ftp_proxy WORKER_HTTP_PROXY WORKER_HTTPS_PROXY; do if printenv "$key" | grep -q .; then echo "仍有代理：$key"; exit 1; fi; done; echo "代理变量已清空"'
+dc exec -T worker curl --noproxy '*' -sS -o /dev/null -w '%{http_code}\n' --connect-timeout 10 --max-time 20 https://api.groq.com/
+dc exec -T api node dist/cli/mail-verify.js
+```
+
+直连能力取决于服务器所在地区和服务商的网络可达性。清华 APT / pip 源仍然保留，它们是软件包镜像源，不连接本地梯子。Docker 客户端与服务代理配置的区别参见 [Docker 客户端代理文档](https://docs.docker.com/engine/cli/proxy/)和[守护进程代理文档](https://docs.docker.com/engine/daemon/proxy/)。
+
 ## 4. 管理员与日常操作
 
 创建尚未注册过的管理员邮箱，按终端提示输入密码：

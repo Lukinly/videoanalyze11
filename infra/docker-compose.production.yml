@@ -1,5 +1,19 @@
 name: videoanalyze-production
 
+# Override proxy defaults injected by the Docker client. Production connects directly.
+x-direct-network: &direct-network
+  HTTP_PROXY: ""
+  HTTPS_PROXY: ""
+  ALL_PROXY: ""
+  FTP_PROXY: ""
+  http_proxy: ""
+  https_proxy: ""
+  all_proxy: ""
+  ftp_proxy: ""
+  NO_PROXY: "*"
+  no_proxy: "*"
+  NODE_USE_ENV_PROXY: "0"
+
 x-node: &node
   restart: unless-stopped
   init: true
@@ -26,6 +40,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
+      <<: *direct-network
       POSTGRES_DB: videoanalyze
       POSTGRES_USER: videoanalyze
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
@@ -41,6 +56,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    environment: *direct-network
     restart: unless-stopped
     command: [redis-server, --appendonly, "yes", --maxmemory, 256mb, --maxmemory-policy, noeviction]
     volumes: [redis-data:/data]
@@ -57,6 +73,7 @@ services:
     image: videoanalyze-storage:${IMAGE_TAG:-local}
     restart: unless-stopped
     environment:
+      <<: *direct-network
       GARAGE_DEFAULT_BUCKET: ${S3_BUCKET:-videoanalyze}
       RUST_LOG: garage=warn
     secrets: [s3_access_key, s3_secret_key, storage_rpc_secret]
@@ -80,7 +97,7 @@ services:
     image: videoanalyze-api:${IMAGE_TAG:-local}
     build: { context: .., dockerfile: apps/api/Dockerfile }
     environment:
-      <<: *storage
+      <<: [*direct-network, *storage]
       PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST}
     secrets: [s3_access_key, s3_secret_key]
     depends_on:
@@ -92,7 +109,8 @@ services:
     restart: "no"
     image: videoanalyze-api:${IMAGE_TAG:-local}
     build: { context: .., dockerfile: apps/api/Dockerfile }
-    environment: *database
+    environment:
+      <<: [*direct-network, *database]
     secrets: [db_password]
     depends_on:
       postgres: { condition: service_healthy }
@@ -103,7 +121,7 @@ services:
     image: videoanalyze-api:${IMAGE_TAG:-local}
     build: { context: .., dockerfile: apps/api/Dockerfile }
     environment:
-      <<: [*database, *storage]
+      <<: [*direct-network, *database, *storage]
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       S3_PUBLIC_ENDPOINT: ${STORAGE_HOST:?set STORAGE_HOST}
@@ -141,7 +159,10 @@ services:
     build: { context: .., dockerfile: apps/worker/Dockerfile }
     image: videoanalyze-worker:${IMAGE_TAG:-local}
     environment:
-      <<: [*database, *storage]
+      <<: [*direct-network, *database, *storage]
+      WORKER_HTTP_PROXY: ""
+      WORKER_HTTPS_PROXY: ""
+      WORKER_NO_PROXY: "*"
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       GROQ_API_KEY_FILE: /run/secrets/groq_api_key
@@ -162,6 +183,7 @@ services:
 
   web:
     build: { context: .., dockerfile: apps/web/Dockerfile }
+    environment: *direct-network
     image: videoanalyze-web:${IMAGE_TAG:-local}
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
@@ -171,6 +193,7 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
+      <<: *direct-network
       PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST}
       STORAGE_HOST: ${STORAGE_HOST:?set STORAGE_HOST}
       STORAGE_UPSTREAM: storage:3900
