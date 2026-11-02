@@ -132,6 +132,26 @@ dc exec -T api node dist/cli/mail-verify.js
 
 直连能力取决于服务器所在地区和服务商的网络可达性。清华 APT / pip 源仍然保留，它们是软件包镜像源，不连接本地梯子。Docker 客户端与服务代理配置的区别参见 [Docker 客户端代理文档](https://docs.docker.com/engine/cli/proxy/)和[守护进程代理文档](https://docs.docker.com/engine/daemon/proxy/)。
 
+### B 站链接读取出现 HTTP 412
+
+API 现在直接调用镜像内已有的 `bilibili-api-python`，一次取得标题、封面和所有分 P 的时长。此前先调用 `bili video` 再单独用 Node 请求详情接口，第二次请求可能返回 412，导致前一步成功的结果也无法使用。新流程不依赖本机浏览器或梯子，不新增 Python 依赖；计费仍取所选分 P 的真实时长，缺失时不使用整段视频总时长代替。
+
+更新需要重新构建 API 镜像，将 Python 元数据脚本一起打包：
+
+```bash
+git pull --ff-only origin main
+dc build api
+dc up -d --no-deps --no-build --wait --wait-timeout 180 api
+```
+
+可用一个公开视频检查服务器读取情况（只获取公开元数据，不调用语音或大模型、不消耗项目积分）：
+
+```bash
+dc exec -T api python3 /app/scripts/bilibili-metadata.py BV1TLR1BGEh7
+```
+
+本机成功不代表服务器的公网出口同样可用。若上述脚本在服务器仍返回 412，说明库的请求也受到平台限制；保留直连配置，使用本地视频上传，或在平台限制解除后再试。不要反复点击读取或批量重试。
+
 ## 4. 管理员与日常操作
 
 创建尚未注册过的管理员邮箱，按终端提示输入密码：

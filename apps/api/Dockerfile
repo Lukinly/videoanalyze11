@@ -39,6 +39,7 @@ COPY --from=build /workspace/deploy ./
 COPY --from=build /workspace/apps/api/dist ./dist
 COPY --from=build /workspace/apps/api/src/db/migrations ./dist/db/migrations
 COPY --from=build /workspace/apps/api/package.json ./package.json
+COPY apps/api/scripts/bilibili-metadata.py /app/scripts/bilibili-metadata.py
 COPY scripts/load-container-secrets.mjs /app/load-container-secrets.mjs
 COPY scripts/configure-storage.mjs /app/configure-storage.mjs
 ENV NODE_OPTIONS="--import=/app/load-container-secrets.mjs"

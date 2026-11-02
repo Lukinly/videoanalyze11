@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { DomainError, parseVideoLink, type ParsedVideoLink } from "@videoanalyze/domain";
 import type { LinkMetadata } from "./link-import-service.js";
 
@@ -21,7 +22,7 @@ export function createPlatformInspector(input: { run?: CommandRunner; resolveSho
         try {
           if (parsed.platform === "youtube") return await inspectYouTube(parsed, run);
           try {
-            return await inspectBilibili(parsed, run, input.fetchBilibiliView ?? fetchBilibiliView);
+            return await inspectBilibili(parsed, input.fetchBilibiliView ?? ((bvid) => fetchBilibiliView(bvid, run)));
           } catch (error) {
             if (error instanceof DomainError) throw error;
             if (allowBrowserFallback) {
@@ -59,28 +60,28 @@ async function inspectYouTube(source: ParsedVideoLink, run: CommandRunner) {
   };
 }
 
-async function inspectBilibili(source: ParsedVideoLink, run: CommandRunner, fetchView: BilibiliViewFetcher) {
-  const root = JSON.parse(await run("bili", ["video", source.canonicalUrl, "--json"])) as Record<string, unknown>;
-  if (root.ok === false) throw new Error(stringValue(objectValue(root.error)?.message) ?? "Bilibili metadata lookup failed");
-  const data = objectValue(root.data) ?? root;
-  const video = objectValue(data.video) ?? data;
+async function inspectBilibili(source: ParsedVideoLink, fetchView: BilibiliViewFetcher) {
   const view = await fetchView(source.externalId);
+  if (view.bvid !== source.externalId) throw new Error("Bilibili returned a different video");
+  const rights = objectValue(view.rights);
+  if ([rights?.pay, rights?.ugc_pay, rights?.arc_pay].some((value) => Number(value) > 0)) throw new DomainError("UNSUPPORTED_MEDIA", "暂不支持付费视频，请使用公开的视频链接。", 422);
+  if (stringValue(view.redirect_url)) throw new DomainError("UNSUPPORTED_MEDIA", "暂不支持番剧视频，请使用公开的视频链接。", 422);
   const pages = Array.isArray(view.pages) ? view.pages as Array<Record<string, unknown>> : [];
   const selectedPage = source.part ? pages.find((page) => Number(page.page) === source.part) : pages[0];
   if (source.part && !selectedPage) throw new DomainError("UNSUPPORTED_MEDIA", `B站视频分P p=${source.part} 不存在。`, 422);
-  const owner = objectValue(video.owner);
-  const subtitle = objectValue(data.subtitle);
-  const baseTitle = requiredString(video.title, "video title");
+  if (!selectedPage) throw new Error("Bilibili part duration is unavailable");
+  const owner = objectValue(view.owner);
+  const baseTitle = requiredString(view.title, "video title");
   const partTitle = source.part && selectedPage ? stringValue(selectedPage.part) : null;
   return {
     ...source,
     title: partTitle ? `${baseTitle} · ${partTitle}` : baseTitle,
-    author: stringValue(owner?.name) ?? stringValue(video.author) ?? "",
-    duration: numberValue(selectedPage?.duration ?? video.duration_seconds ?? video.duration),
-    thumbnailUrl: stringValue(view.pic) ?? stringValue(video.pic) ?? stringValue(video.cover) ?? "",
-    isLive: Boolean(video.is_live),
-    subtitleLanguage: stringValue(subtitle?.language) ?? "zh-CN",
-    subtitleKind: subtitle?.available || video.has_subtitle ? "manual" as const : null
+    author: stringValue(owner?.name) ?? "",
+    duration: numberValue(selectedPage.duration),
+    thumbnailUrl: (stringValue(view.pic) ?? "").replace(/^http:/, "https:"),
+    isLive: Boolean(view.is_live),
+    subtitleLanguage: "zh-CN",
+    subtitleKind: null
   };
 }
 
@@ -112,26 +113,14 @@ async function inspectBilibiliInBrowser(source: ParsedVideoLink, run: CommandRun
 }
 
 async function runCommand(command: string, args: string[]) {
-  try {
-    const result = await execFileAsync(command, args, { timeout: 30_000, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" });
-    return result.stdout;
-  } catch (error) {
-    // bili reports its useful failure reason as JSON on stdout, even when it
-    // exits nonzero. execFile's default message omits that response entirely.
-    if (command === "bili" && error && typeof error === "object" && "stdout" in error && typeof error.stdout === "string") {
-      let payload: Record<string, unknown> | null = null;
-      try { payload = objectValue(JSON.parse(error.stdout)); } catch { /* preserve process errors */ }
-      const message = stringValue(objectValue(payload?.error)?.message);
-      if (message) throw new Error(message);
-    }
-    throw error;
-  }
+  const result = await execFileAsync(command, args, { timeout: 30_000, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" });
+  return result.stdout;
 }
 
 function bilibiliMetadataError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   if (/\b412\b|-352|风控|rate.?limit/i.test(message)) return new DomainError("UNSUPPORTED_MEDIA", "B站暂时限制了自动读取（HTTP 412）。请稍后重试，或上传本地视频。", 422);
-  if (/ENOENT|not found/i.test(message)) return new DomainError("UNSUPPORTED_MEDIA", "B站读取工具不可用，请检查 bili 或本机 OpenCLI 配置，或上传本地视频。", 422);
+  if (/ENOENT|not found|No module named/i.test(message)) return new DomainError("UNSUPPORTED_MEDIA", "B站读取工具不可用，请检查 Python 视频依赖，或上传本地视频。", 422);
   return new DomainError("UNSUPPORTED_MEDIA", "暂时无法读取这个 B站视频，请确认视频公开可访问后重试，或上传本地视频。", 422);
 }
 
@@ -153,14 +142,10 @@ export async function resolveBilibiliShortUrl(url: string, fetcher: RedirectFetc
   throw new Error("short link redirected too many times");
 }
 
-async function fetchBilibiliView(bvid: string) {
-  const endpoint = new URL("https://api.bilibili.com/x/web-interface/view");
-  endpoint.searchParams.set("bvid", bvid);
-  const response = await fetch(endpoint, { signal: AbortSignal.timeout(10_000), headers: { "User-Agent": "Mozilla/5.0 videoanalyze/1.0", Referer: `https://www.bilibili.com/video/${bvid}` } });
-  if (!response.ok) throw new Error(`Bilibili metadata returned HTTP ${response.status}`);
-  const payload = await response.json() as Record<string, unknown>;
-  const data = objectValue(payload.data);
-  if (Number(payload.code) !== 0 || !data) throw new Error("Bilibili metadata is unavailable");
+async function fetchBilibiliView(bvid: string, run: CommandRunner) {
+  const helper = fileURLToPath(new URL("../../scripts/bilibili-metadata.py", import.meta.url));
+  const data = objectValue(JSON.parse(await run("python3", [helper, bvid])));
+  if (!data) throw new Error("Bilibili metadata is unavailable");
   return data;
 }
 
