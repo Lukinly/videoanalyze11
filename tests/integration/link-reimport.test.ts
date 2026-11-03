@@ -9,6 +9,7 @@ import { createAnalysisService } from "../../apps/api/src/analysis/analysis-serv
 import { createLinkImportService, type LinkMetadata } from "../../apps/api/src/links/link-import-service.js";
 import { createResultRepository } from "../../apps/api/src/results/result-repository.js";
 import { createResultService } from "../../apps/api/src/results/result-service.js";
+import { repairSourceTitles } from "../../apps/api/src/links/source-title-repair.js";
 
 // Run real source uniqueness constraints, row locks and result deletion in an
 // isolated schema. No remote video, model, SMTP or storage requests are made.
@@ -112,7 +113,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("PostgreSQL deleted link reimpor
     await pool.query("UPDATE videos SET file_name='已删除的视频' WHERE id=$1", [video.videoId]);
     await expect(resultService.get({ userId, runId: first.id })).resolves.toMatchObject({ fileName: "B站视频 · BV1AB411c7mD · P3", resultAvailability: "available" });
     await service.confirm({ userId, url: metadata.canonicalUrl });
-    await expect(resultService.get({ userId, runId: first.id })).resolves.toMatchObject({ fileName: metadata.title });
+    await expect(resultService.get({ userId, runId: first.id })).resolves.toMatchObject({ fileName: `B站视频 · ${metadata.title}` });
     await resultService.delete({ userId, runId: first.id });
     await service.confirm({ userId, url: metadata.canonicalUrl });
     await expect(resultService.get({ userId, runId: first.id })).rejects.toMatchObject({ status: 410 });
@@ -164,5 +165,74 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)("PostgreSQL deleted link reimpor
     await expect(resultService.get({ userId, runId: current.id })).resolves.toMatchObject({ fileName: metadata.title, resultAvailability: "available", transcript: { segments: [{ text: "current result" }] } });
     await expect(resultService.get({ userId, runId: old1.id })).rejects.toMatchObject({ status: 410 });
     await expect(resultService.get({ userId, runId: old2.id })).rejects.toMatchObject({ status: 410 });
+  });
+
+  async function damagedSource(metadata: LinkMetadata) {
+    const userId = await user(), video = await importer(metadata).confirm({ userId, url: metadata.canonicalUrl });
+    const run = await analysis.start({ userId, videoId: video.videoId });
+    await complete(run.id);
+    await pool.query("UPDATE videos SET file_name='已删除的视频' WHERE id=$1", [video.videoId]);
+    await pool.query("UPDATE analysis_runs SET display_name='已删除的视频' WHERE id=$1", [run.id]);
+    return { userId, videoId: video.videoId, runId: run.id };
+  }
+
+  it("restores a lost title without starting an analysis, changing results or billing", async () => {
+    const metadata = source("bilibili", 3), damaged = await damagedSource(metadata);
+    const inspect = vi.fn(async () => metadata);
+    const before = (await pool.query("SELECT * FROM analysis_runs WHERE id=$1", [damaged.runId])).rows[0];
+    const queuedBefore = queue.add.mock.calls.length;
+    const report = await repairSourceTitles({ pool, inspector: { inspect }, url: metadata.canonicalUrl, email: `${damaged.userId}@example.test` });
+    expect(report).toEqual({ scanned: 1, repaired: 1, skipped: 0, failed: 0, failures: [] });
+    expect(inspect).toHaveBeenCalledExactlyOnceWith(metadata.canonicalUrl);
+    await expect(resultService.get({ userId: damaged.userId, runId: damaged.runId })).resolves.toMatchObject({ fileName: `B站视频 · ${metadata.title}`, resultAvailability: "available" });
+    expect((await pool.query("SELECT * FROM analysis_runs WHERE id=$1", [damaged.runId])).rows[0]).toEqual(before);
+    expect(queue.add.mock.calls.length).toBe(queuedBefore);
+    expect((await pool.query("SELECT COUNT(*)::int AS count FROM credit_ledger WHERE user_id=$1", [damaged.userId])).rows[0].count).toBe(0);
+    await expect(repairSourceTitles({ pool, inspector: { inspect }, url: metadata.canonicalUrl, email: `${damaged.userId}@example.test` })).resolves.toMatchObject({ scanned: 0, repaired: 0 });
+    expect(inspect).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors owner filters and reuses one metadata request for the same source", async () => {
+    const metadata = source("bilibili", 4), first = await damagedSource(metadata), second = await damagedSource(metadata);
+    const inspect = vi.fn(async () => metadata);
+    await expect(repairSourceTitles({ pool, inspector: { inspect }, url: metadata.canonicalUrl, email: `${first.userId}@example.test` })).resolves.toMatchObject({ scanned: 1, repaired: 1 });
+    expect((await videos.findOwnedById(second.userId, second.videoId))?.fileName).toBe("已删除的视频");
+    const third = await damagedSource(metadata);
+    inspect.mockClear();
+    await expect(repairSourceTitles({ pool, inspector: { inspect }, url: metadata.canonicalUrl })).resolves.toMatchObject({ scanned: 2, repaired: 2 });
+    expect(inspect).toHaveBeenCalledTimes(1);
+    expect((await videos.findOwnedById(third.userId, third.videoId))?.fileName).toBe(metadata.title);
+  });
+
+  it("does not fetch or restore titles for deleted and expired-only sources", async () => {
+    const metadata = source("bilibili", 5), deleted = await damagedSource(metadata), expired = await damagedSource(metadata);
+    await resultService.delete({ userId: deleted.userId, runId: deleted.runId });
+    await pool.query("UPDATE analysis_runs SET retention_mode='privacy', result_expires_at=$2 WHERE id=$1", [expired.runId, new Date(0)]);
+    const inspect = vi.fn(async () => metadata);
+    await expect(repairSourceTitles({ pool, inspector: { inspect }, url: metadata.canonicalUrl })).resolves.toMatchObject({ scanned: 0, repaired: 0 });
+    expect(inspect).not.toHaveBeenCalled();
+    await expect(resultService.get({ userId: deleted.userId, runId: deleted.runId })).rejects.toMatchObject({ status: 410 });
+    await expect(resultService.get({ userId: expired.userId, runId: expired.runId })).rejects.toMatchObject({ status: 410 });
+  });
+
+  it("keeps existing data on network failure and rejects a title from a different source", async () => {
+    const metadata = source("bilibili", 6), damaged = await damagedSource(metadata);
+    const filter = { url: metadata.canonicalUrl, email: `${damaged.userId}@example.test` };
+    await expect(repairSourceTitles({ pool, ...filter, inspector: { inspect: async () => { throw new Error("secret-sentinel"); } } })).resolves.toMatchObject({ repaired: 0, failed: 1, failures: [{ code: "SOURCE_METADATA_UNAVAILABLE" }] });
+    const report = await repairSourceTitles({ pool, ...filter, inspector: { inspect: async () => ({ ...metadata, part: 7 }) } });
+    expect(report).toMatchObject({ repaired: 0, failed: 1, failures: [{ code: "SOURCE_TITLE_INVALID" }] });
+    expect(JSON.stringify(report)).not.toContain("secret-sentinel");
+    expect((await videos.findOwnedById(damaged.userId, damaged.videoId))?.fileName).toBe("已删除的视频");
+  });
+
+  it("rechecks deletion after the metadata request before persisting a title", async () => {
+    const metadata = source("bilibili", 8), damaged = await damagedSource(metadata);
+    const report = await repairSourceTitles({ pool, url: metadata.canonicalUrl, inspector: { inspect: async () => {
+      await resultService.delete({ userId: damaged.userId, runId: damaged.runId });
+      return metadata;
+    } } });
+    expect(report).toMatchObject({ scanned: 1, repaired: 0, skipped: 1, failed: 0 });
+    expect((await videos.findOwnedById(damaged.userId, damaged.videoId))?.fileName).toBe("已删除的视频");
+    await expect(resultService.get({ userId: damaged.userId, runId: damaged.runId })).rejects.toMatchObject({ status: 410 });
   });
 });

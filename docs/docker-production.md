@@ -151,6 +151,21 @@ dc exec -T api python3 /app/scripts/bilibili-metadata.py BV1TLR1BGEh7
 
 本机成功不代表服务器的公网出口同样可用。若上述脚本在服务器仍返回 412，说明库的请求也受到平台限制；保留直连配置，使用本地视频上传，或在平台限制解除后再试。不要反复点击读取或批量重试。
 
+### 恢复旧链接记录的视频标题
+
+旧版本删除结果时可能把共用的视频标题清空，历史列表因此显示“B站视频 · BV编号”。更新 API 后运行：
+
+```bash
+dc exec -T api node dist/cli/repair-source-titles.js
+# Or repair only a specific source or account:
+dc exec -T api node dist/cli/repair-source-titles.js --url 'https://www.bilibili.com/video/BV1TLR1BGEh7'
+dc exec -T api node dist/cli/repair-source-titles.js --email user@example.com --limit 50
+```
+
+命令只为仍有有效分析记录且缺失标题的来源读取公开元数据，同一视频分 P 在一次运行中只读取一次，逐个处理。默认最多检查 50 条，可用 `--limit` 设置 1–200。结果输出 `scanned`、`repaired`、`skipped`、`failed`；重复执行会跳过已恢复的来源。`failed` 非零时退出码为 1，安全错误码会指出读取失败、来源不匹配或保存失败，不输出平台原始错误、凭据或邮箱。
+
+刷新网页后恢复为“B站视频 · 视频标题”。命令不下载音视频、不调用模型、不创建分析或积分账目，也不改动已有结果。已删除和隐私已到期的记录不恢复；如果读取期间删除了结果，保存前会重新确认是否仍有有效记录。正常访问历史列表不会增加原站请求。平台暂时限制读取时保留编号，稍后再运行同一命令即可。
+
 ### Qwen3.8-Omni-Flash 语音识别
 
 Worker 通过 OpenAI 兼容 Chat Completions 接收音频并读取流式文本，默认 `ASR_MODEL=qwen3.8-omni-flash`、`ASR_API_BASE_URL=https://cn-beijing.maas.qianwenaiapi.com/compatible-mode/v1`。密钥直接复用现有 `llm_api_key`，无需另建 ASR 密钥，不再挂载或要求 `groq_api_key`。旧密钥文件不会被脚本删除，但生产 Worker 不会读取它。

@@ -14,9 +14,9 @@ const metadataSelect = `SELECT run.id, run.user_id AS "userId", run.video_id AS 
   CASE WHEN run.display_name = '已删除的视频' AND run.results_deleted_at IS NULL
     AND video.source_platform IN ('bilibili', 'youtube')
     AND (run.retention_mode = 'standard' OR run.result_expires_at IS NULL OR run.result_expires_at > now())
-  THEN CASE WHEN video.file_name NOT IN ('已删除的视频', '') THEN video.file_name
-    ELSE (CASE WHEN video.source_platform = 'bilibili' THEN 'B站视频 · ' ELSE 'YouTube 视频 · ' END)
-      || video.external_video_id || CASE WHEN video.source_part IS NULL THEN '' ELSE ' · P' || video.source_part::text END END
+  THEN (CASE WHEN video.source_platform = 'bilibili' THEN 'B站视频 · ' ELSE 'YouTube 视频 · ' END)
+    || CASE WHEN video.file_name NOT IN ('已删除的视频', '') THEN video.file_name
+      ELSE video.external_video_id || CASE WHEN video.source_part IS NULL THEN '' ELSE ' · P' || video.source_part::text END END
   ELSE run.display_name END AS "fileName",
   run.retention_mode AS "retentionMode", run.result_expires_at AS "resultExpiresAt",
   run.results_deleted_at AS "resultsDeletedAt", run.created_at AS "createdAt", run.updated_at AS "updatedAt",

@@ -82,7 +82,7 @@ describe("result repository", () => {
     const repository = createResultRepository(pool);
     await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "B站视频 · BV1AB411c7mD · P3", resultsDeletedAt: null });
     await pool.query("UPDATE videos SET file_name='重新读取的课程标题' WHERE id='v1'");
-    await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "重新读取的课程标题" });
+    await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "B站视频 · 重新读取的课程标题" });
     await pool.query("UPDATE analysis_runs SET retention_mode='privacy', result_expires_at=$1 WHERE id='r1'", [now]);
     await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "已删除的视频" });
     await pool.query("UPDATE analysis_runs SET retention_mode='standard', results_deleted_at=$1 WHERE id='r1'", [now]);
