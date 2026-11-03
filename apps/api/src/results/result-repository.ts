@@ -10,7 +10,14 @@ export type ResultMetadata = {
 };
 
 const metadataSelect = `SELECT run.id, run.user_id AS "userId", run.video_id AS "videoId",
-  run.stage, run.status, run.progress, run.error, run.display_name AS "fileName",
+  run.stage, run.status, run.progress, run.error,
+  CASE WHEN run.display_name = '已删除的视频' AND run.results_deleted_at IS NULL
+    AND video.source_platform IN ('bilibili', 'youtube')
+    AND (run.retention_mode = 'standard' OR run.result_expires_at IS NULL OR run.result_expires_at > now())
+  THEN CASE WHEN video.file_name NOT IN ('已删除的视频', '') THEN video.file_name
+    ELSE (CASE WHEN video.source_platform = 'bilibili' THEN 'B站视频 · ' ELSE 'YouTube 视频 · ' END)
+      || video.external_video_id || CASE WHEN video.source_part IS NULL THEN '' ELSE ' · P' || video.source_part::text END END
+  ELSE run.display_name END AS "fileName",
   run.retention_mode AS "retentionMode", run.result_expires_at AS "resultExpiresAt",
   run.results_deleted_at AS "resultsDeletedAt", run.created_at AS "createdAt", run.updated_at AS "updatedAt",
   run.billing_rule_version AS "billingRuleVersion", run.billed_duration_seconds AS "billedDurationSeconds",
@@ -59,14 +66,20 @@ export function createResultRepository(pool: Pool) {
     },
     async deleteOwnedResults(userId: string, runId: string, now: Date): Promise<boolean> {
       return inTransaction(pool, async (client) => {
+        // Serialize shared-label changes with source refresh and run creation.
+        // Lock the video before its run, matching the other lifecycle writers.
+        const video = await client.query(`SELECT id FROM videos WHERE user_id = $2
+          AND id = (SELECT video_id FROM analysis_runs WHERE id = $1 AND user_id = $2) FOR UPDATE`, [runId, userId]);
+        if (!video.rowCount) return false;
         const owned = await client.query<{ videoId: string }>(`SELECT video_id AS "videoId" FROM analysis_runs WHERE id = $1 AND user_id = $2 FOR UPDATE`, [runId, userId]);
         const run = owned.rows[0];
         if (!run) return false;
         for (const table of ["transcript_segments", "chapters", "ai_notes", "ephemeral_transcript_segments", "ephemeral_run_summaries", "ephemeral_chapters", "ephemeral_ai_notes"]) await client.query(`DELETE FROM ${table} WHERE run_id = $1`, [runId]);
         await client.query("UPDATE chunks SET transcript_json = NULL, transcript_object_key = NULL, error = NULL WHERE run_id = $1", [runId]);
         await client.query(`UPDATE analysis_runs SET summary_json = NULL, results_deleted_at = COALESCE(results_deleted_at, $3), display_name = '已删除的视频', updated_at = $3 WHERE id = $1 AND user_id = $2`, [runId, userId, now]);
-        const labels = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM analysis_runs WHERE video_id = $1 AND id <> $2 AND results_deleted_at IS NULL AND status = 'completed' AND (retention_mode = 'standard' OR result_expires_at > $3)`, [run.videoId, runId, now]);
-        if ((labels.rows[0]?.count ?? 0) === 0) await client.query(`UPDATE videos SET file_name = '已删除的视频', updated_at = $3 WHERE id = $1 AND user_id = $2 AND original_deleted_at IS NOT NULL`, [run.videoId, userId, now]);
+        const labels = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM analysis_runs WHERE video_id = $1 AND id <> $2 AND results_deleted_at IS NULL AND (retention_mode = 'standard' OR result_expires_at IS NULL OR result_expires_at > $3)`, [run.videoId, runId, now]);
+        // External source metadata is reusable; deletion redacts only this run.
+        if ((labels.rows[0]?.count ?? 0) === 0) await client.query(`UPDATE videos SET file_name = '已删除的视频', updated_at = $3 WHERE id = $1 AND user_id = $2 AND source_platform = 'upload' AND original_deleted_at IS NOT NULL`, [run.videoId, userId, now]);
         return true;
       });
     }

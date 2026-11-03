@@ -41,7 +41,9 @@ export function createLinkImportService(input: {
     },
     async confirm(value: { userId: string; url: string }) {
       const { metadata, billing, existing } = await inspect(value);
-      const videoId = existing?.videoId ?? (await input.repository.createLinkVideo({ userId: value.userId, ...metadata })).id;
+      // Refresh the reusable source even when an earlier result was deleted and
+      // its shared title was redacted. The repository upserts by owned source.
+      const videoId = (await input.repository.createLinkVideo({ userId: value.userId, ...metadata })).id;
       return { videoId, existingRunId: existing?.runId ?? null, duplicateStatus: existing?.runStatus ?? null, ...metadata, estimatedCost: billing.reservedCredits, billing };
     }
   };

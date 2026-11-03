@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLinkImportService } from "./link-import-service.js";
 
 describe("link import service", () => {
@@ -39,5 +39,15 @@ describe("link import service", () => {
     await service.preview({ userId: "u", url: "https://youtu.be/dQw4w9WgXcQ" });
     await expect(service.confirm({ userId: "u", url: "https://youtu.be/dQw4w9WgXcQ" })).resolves.toMatchObject({ videoId: "video-1" });
     expect(inspections).toBe(2);
+  });
+
+  it("refreshes existing source metadata on confirmation before another analysis starts", async () => {
+    const metadata = { platform: "bilibili" as const, externalId: "BV1AB411c7mD", part: 3, canonicalUrl: "https://www.bilibili.com/video/BV1AB411c7mD?p=3", title: "课程 P3", author: "UP", duration: 600, thumbnailUrl: "", isLive: false, subtitleLanguage: "zh-CN" };
+    const createLinkVideo = vi.fn(async () => ({ id: "old-video" }));
+    const service = createLinkImportService({ inspector: { inspect: async () => metadata }, repository: {
+      findOwnedBySource: async () => ({ videoId: "old-video", runId: null, runStatus: null }), createLinkVideo
+    } });
+    await expect(service.confirm({ userId: "u", url: metadata.canonicalUrl })).resolves.toMatchObject({ videoId: "old-video", existingRunId: null, title: metadata.title });
+    expect(createLinkVideo).toHaveBeenCalledExactlyOnceWith({ userId: "u", ...metadata });
   });
 });

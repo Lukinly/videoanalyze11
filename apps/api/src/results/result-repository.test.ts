@@ -60,6 +60,35 @@ describe("result repository", () => {
     expect((await pool.query("SELECT file_name FROM videos WHERE id='v1'")).rows[0].file_name).toBe("clip.mp4");
   });
 
+  it.each(["queued", "running", "cancelling", "failed", "cancelled"])("keeps the shared source label for another undeleted %s run", async (status) => {
+    await seedRun({ userId: "u1", runId: "r1", mode: "standard", originalDeleted: true });
+    await pool.query("INSERT INTO analysis_runs (id,user_id,video_id,display_name,retention_mode,stage,status,progress,created_at,updated_at) VALUES ('r2','u1','v1','clip.mp4','privacy','transcribing',$1,0.2,$2,$2)", [status, now]);
+    await createResultRepository(pool).deleteOwnedResults("u1", "r1", now);
+    expect((await pool.query("SELECT file_name FROM videos WHERE id='v1'")).rows[0].file_name).toBe("clip.mp4");
+  });
+
+  it("deletes only the run label while preserving reusable external source metadata", async () => {
+    await seedRun({ userId: "u1", runId: "r1", mode: "standard", originalDeleted: true });
+    await pool.query("UPDATE videos SET source_platform='bilibili', external_video_id='BV1AB411c7mD', source_part=3 WHERE id='v1'");
+    await createResultRepository(pool).deleteOwnedResults("u1", "r1", now);
+    expect((await pool.query("SELECT file_name FROM videos WHERE id='v1'")).rows[0].file_name).toBe("clip.mp4");
+    expect((await pool.query("SELECT display_name FROM analysis_runs WHERE id='r1'")).rows[0].display_name).toBe("已删除的视频");
+  });
+
+  it("corrects legacy corrupted labels without restoring deleted or expired results", async () => {
+    await seedRun({ userId: "u1", runId: "r1", mode: "standard", originalDeleted: true });
+    await pool.query("UPDATE videos SET file_name='已删除的视频', source_platform='bilibili', external_video_id='BV1AB411c7mD', source_part=3 WHERE id='v1'");
+    await pool.query("UPDATE analysis_runs SET display_name='已删除的视频' WHERE id='r1'");
+    const repository = createResultRepository(pool);
+    await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "B站视频 · BV1AB411c7mD · P3", resultsDeletedAt: null });
+    await pool.query("UPDATE videos SET file_name='重新读取的课程标题' WHERE id='v1'");
+    await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "重新读取的课程标题" });
+    await pool.query("UPDATE analysis_runs SET retention_mode='privacy', result_expires_at=$1 WHERE id='r1'", [now]);
+    await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "已删除的视频" });
+    await pool.query("UPDATE analysis_runs SET retention_mode='standard', results_deleted_at=$1 WHERE id='r1'", [now]);
+    await expect(repository.findOwnedMetadata("u1", "r1")).resolves.toMatchObject({ fileName: "已删除的视频", resultsDeletedAt: now });
+  });
+
   it("does not report held credits as billed history", async () => {
     await seedRun({ userId: "u1", runId: "r1", mode: "standard" });
     await pool.query("INSERT INTO credit_reservations (id,user_id,run_id,amount,status,idempotency_key,created_at) VALUES ('cr1','u1','r1',95,'held','ik',$1)", [now]);

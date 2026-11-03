@@ -24,8 +24,11 @@ export function createVideoRepository(pool: Pool) {
         `SELECT video.id AS "videoId", run.id AS "runId", run.status AS "runStatus"
          FROM videos video
          LEFT JOIN LATERAL (
-           SELECT id, status FROM analysis_runs WHERE video_id = video.id
-           ORDER BY created_at DESC LIMIT 1
+           SELECT id, status FROM analysis_runs WHERE video_id = video.id AND user_id = $1
+             AND results_deleted_at IS NULL
+             AND (retention_mode = 'standard' OR result_expires_at IS NULL OR result_expires_at > now())
+           ORDER BY CASE WHEN status IN ('queued', 'running', 'cancelling') THEN 0 ELSE 1 END,
+             created_at DESC, id DESC LIMIT 1
          ) run ON TRUE
          WHERE video.user_id = $1 AND video.source_platform = $2 AND video.external_video_id = $3
            AND COALESCE(video.source_part, 0) = COALESCE($4, 0) AND video.status <> 'deleted'
@@ -41,19 +44,20 @@ export function createVideoRepository(pool: Pool) {
         `INSERT INTO videos (id, user_id, object_key, file_name, file_size, duration, status, created_at, updated_at,
            original_deleted_at, source_platform, source_url, external_video_id, source_part, source_author, thumbnail_url, subtitle_language, subtitle_kind)
          VALUES ($1, $2, $3, $4, 0, $5, 'available', $6, $6, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-         ON CONFLICT DO NOTHING
+         ON CONFLICT (user_id, source_platform, external_video_id, (COALESCE(source_part, 0)))
+           WHERE source_platform <> 'upload' AND status <> 'deleted'
+         DO UPDATE SET file_name = EXCLUDED.file_name, duration = EXCLUDED.duration, status = 'available',
+           source_url = EXCLUDED.source_url, source_author = EXCLUDED.source_author,
+           thumbnail_url = EXCLUDED.thumbnail_url, subtitle_language = EXCLUDED.subtitle_language,
+           subtitle_kind = EXCLUDED.subtitle_kind, updated_at = EXCLUDED.updated_at
          RETURNING id, user_id AS "userId", object_key AS "objectKey", file_name AS "fileName",
            file_size::bigint AS "fileSize", duration, status, original_deleted_at AS "originalDeletedAt",
            source_platform AS "sourcePlatform", source_url AS "sourceUrl", source_author AS "sourceAuthor", thumbnail_url AS "thumbnailUrl"`,
         [id, input.userId, `remote/${encodeURIComponent(input.userId)}/${input.platform}/${input.externalId}${input.part ? `/p${input.part}` : ""}`, input.title, input.duration, now,
           input.platform, input.canonicalUrl, input.externalId, input.part, input.author, input.thumbnailUrl, input.subtitleLanguage, input.subtitleKind ?? null]
       );
-      if (result.rows[0]) return result.rows[0];
-      const existing = await this.findOwnedBySource(input.userId, input.platform, input.externalId, input.part);
-      if (!existing) throw new Error("link video conflict could not be resolved");
-      const record = await this.findOwnedById(input.userId, existing.videoId);
-      if (!record) throw new Error("link video conflict disappeared");
-      return record;
+      if (!result.rows[0]) throw new Error("link video could not be saved");
+      return result.rows[0];
     },
     async create(input: { id?: string; userId: string; objectKey: string; fileName: string; fileSize?: number }): Promise<VideoRecord> {
       const now = new Date();
