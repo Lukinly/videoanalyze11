@@ -21,9 +21,6 @@ services:
       - ../tests/docker/smtp-server.mjs:/smtp-server.mjs:ro
     secrets: [smtp_password, smtp_test_cert, smtp_test_key]
     security_opt: [no-new-privileges:true]
-    networks:
-      default:
-        aliases: [api.groq.com]
 secrets:
   smtp_test_cert: { file: "${SMOKE_DIR:?test-only path}/smtp.crt" }
   smtp_test_key: { file: "${SMOKE_DIR:?test-only path}/smtp.key" }

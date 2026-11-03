@@ -170,9 +170,9 @@ env -u NODE_USE_ENV_PROXY -u http_proxy -u https_proxy -u all_proxy \
 | `E2E_EMAIL` / `E2E_PASSWORD` | 设置后复用已有账号；不设置则自动注册临时账号并从 Mailpit 读验证码 |
 | `E2E_BASE_URL` | 默认 `https://localhost` |
 | `MAILPIT_URL` | 默认 `http://localhost:8025` |
-| `E2E_TIMEOUT_MS` | 默认 45 分钟（真实 worker/Groq 处理较慢） |
+| `E2E_TIMEOUT_MS` | 默认 45 分钟（真实音频识别和笔记生成需要时间） |
 
-需要 Groq key，且会真实消耗配额。
+需要可访问 Qwen3.8-Omni-Flash 的 LLM key，且会真实消耗模型配额。
 
 ## 端口一览
 
@@ -191,7 +191,7 @@ Redis 默认只在容器网络内暴露，未映射到宿主。
 
 | 变量 | 说明 |
 | --- | --- |
-| `GROQ_API_KEY` | 分析 worker 的 Groq 密钥，必填 |
+| `ASR_API_BASE_URL` / `ASR_MODEL` | 音频识别地址与模型，默认北京地域千问兼容接口、`qwen3.8-omni-flash`；复用 LLM 密钥 |
 | `llm_api_key` / `llm_api_base_url` / `llm_api_model` | 摘要与 AI 笔记 LLM（Anthropic 或 OpenAI 兼容端点）；当前流水线要求三项齐全。也接受大写别名 `LLM_API_KEY` / `LLM_API_BASE_URL` / `LLM_API_MODEL` |
 | `LLM_API_PROTOCOL` | `auto`（默认）、`anthropic`、`openai`；DashScope 自动选择 OpenAI 兼容协议 |
 | `LLM_CONTEXT_WINDOW` | 摘要 LLM 上下文窗口，默认 `128000`，决定单窗 vs map-reduce |

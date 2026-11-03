@@ -96,7 +96,7 @@ E2E_RUNTIME=1 E2E_BASE_URL=http://127.0.0.1:5173 \
   corepack pnpm test:e2e
 ```
 
-真实 Groq 和 LLM 端到端验证，需要 Worker 正在运行，会消耗 Provider 配额：
+真实 Qwen 音频识别和 LLM 端到端验证，需要 Worker 正在运行，会消耗模型配额；两者共用现有 LLM key，该 key 需授权北京地域的 `qwen3.8-omni-flash`：
 
 ```bash
 VIDEO_PATH=.local/smoke.mp4 E2E_BASE_URL=http://127.0.0.1:5173 \

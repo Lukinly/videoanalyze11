@@ -4,7 +4,8 @@ import { createAnalysisConsumer } from "./queue/analysis-consumer.js";
 import type { AnalysisJob } from "./queue/queues.js";
 import { createV0AnalysisRunner } from "./analysis/v0-runner.js";
 import { createMediaProcessor } from "./media/media-processor.js";
-import { createGroqAsrProvider } from "./providers/groq-asr.js";
+import { QWEN_ASR_CHUNK_SECONDS, QWEN_ASR_MAX_BYTES } from "./providers/qwen-omni-asr.js";
+import { createConfiguredAsrProvider } from "./providers/asr-provider.js";
 import { createSummaryProvider } from "./providers/summary-provider.js";
 import { createV1SummaryRunner } from "./summary/v1-runner.js";
 import { createNotesRunner } from "./notes/notes-runner.js";
@@ -32,8 +33,6 @@ import { createDatabaseState } from "./analysis/database-state.js";
 const env = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://videoanalyze:videoanalyze@127.0.0.1:5433/videoanalyze",
   redisUrl: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
-  groqApiKey: process.env.GROQ_API_KEY ?? "",
-  groqAsrModel: process.env.GROQ_ASR_MODEL ?? "whisper-large-v3-turbo",
   s3Endpoint: process.env.S3_ENDPOINT ?? "http://127.0.0.1:9000",
   s3Region: process.env.S3_REGION ?? "us-east-1",
   s3Bucket: process.env.S3_BUCKET ?? "videoanalyze",
@@ -53,7 +52,6 @@ const env = {
   llmApiProtocol: process.env.LLM_API_PROTOCOL ?? process.env.llm_api_protocol ?? "auto"
 };
 
-if (!env.groqApiKey || env.groqApiKey.startsWith("replace-")) throw new Error("GROQ_API_KEY is required by the worker");
 if (!env.llmApiKey || !env.llmApiBaseUrl || !env.llmApiModel) throw new Error("LLM API key, base URL and model are required by the worker");
 
 const pool = new Pool({ connectionString: env.databaseUrl, max: Math.max(2, env.concurrency + 1) });
@@ -70,7 +68,7 @@ const media: ReturnType<typeof createMediaProcessor> = {
   remuxToMp4: (...args) => ffmpegSemaphore.run(() => rawMedia.remuxToMp4(...args)),
   captureFrame: (...args) => ffmpegSemaphore.run(() => rawMedia.captureFrame(...args))
 };
-const asr = createGroqAsrProvider({ apiKey: env.groqApiKey, model: env.groqAsrModel });
+const asr = createConfiguredAsrProvider();
 const summaryProvider = env.llmApiKey && env.llmApiBaseUrl && env.llmApiModel
   ? createSummaryProvider({ protocol: env.llmApiProtocol, apiKey: env.llmApiKey, baseUrl: env.llmApiBaseUrl, model: env.llmApiModel, contextWindow: env.llmContextWindow })
   : null;
@@ -102,7 +100,7 @@ const consumer = createAnalysisConsumer({
     async run(job: AnalysisJob & { signal: AbortSignal }) {
       await perUserSemaphore.run(job.userId, async () => {
         const directory = validatedRunDirectory(job.runId);
-        const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, credits, clock });
+        const state = createDatabaseState({ pool, s3, bucket: env.s3Bucket, directory, media, results, credits, clock, chunking: { targetSeconds: QWEN_ASR_CHUNK_SECONDS, maxBytes: QWEN_ASR_MAX_BYTES } });
         await runAnalysisToTerminal({
           async runAndPersist() {
             if (job.signal.aborted || await state.isCancelling(job.runId)) throw new AnalysisCancelledError("before_processing");
@@ -125,7 +123,7 @@ const consumer = createAnalysisConsumer({
               }
             }
             const process = async () => {
-              if (!transcriptImported) await createV0AnalysisRunner({ asr, media, state }).run(job);
+              if (!transcriptImported) await createV0AnalysisRunner({ asr, media, state, audioFormat: "wav" }).run(job);
               if (!summaryProvider) throw new Error("summary and AI notes provider is required");
               await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
               // Resolve video only when notes are ready, since remote URLs expire.

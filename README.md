@@ -22,7 +22,7 @@ tests/             验收测试与 fixture 说明
 docs/              部署、命令、设计和历史交接
 ```
 
-PostgreSQL 保存任务、结果和积分台账；Redis 承载任务队列；MinIO 保存上传媒体。媒体解析使用 FFmpeg/FFprobe 和 Groq ASR，摘要与笔记使用可配置的 Anthropic 或 OpenAI 兼容 LLM（含通义千问）。
+PostgreSQL 保存任务、结果和积分台账；Redis 承载任务队列；MinIO 保存上传媒体。媒体解析使用 FFmpeg/FFprobe，语音识别使用 Qwen3.8-Omni-Flash 并共用 LLM 密钥，摘要与笔记使用可配置的 Anthropic 或 OpenAI 兼容 LLM。
 
 AI 笔记按“标题、时间范围、原视频画面、正文”展示，每节只保留一个回看入口。时间范围来自所引用逐字稿的起止时间，截图选取中间的引用时刻。新分析在原片清理前提取 JPEG 并随笔记保存，共用笔记的访问权限、删除及隐私到期规则，无需额外数据库迁移。
 
@@ -47,7 +47,7 @@ corepack pnpm build
 brew install postgresql@16 redis mailpit ffmpeg
 # 仅首次复制；已有 .env 时保留配置
 cp .env.local.example .env
-# 填写 Groq 和 LLM 配置后启动
+# 填写 LLM 配置（语音识别复用同一枚千问密钥）后启动
 corepack pnpm local:dev
 ```
 

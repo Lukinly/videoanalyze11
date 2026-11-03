@@ -29,7 +29,7 @@ type Media = {
   renderChunk(audioPath: string, outputPath: string, start: number, duration: number, signal?: AbortSignal): Promise<{ path: string; size: number }>;
 };
 
-export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState }) {
+export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState; audioFormat?: "wav" | "flac" }) {
   return {
     async run(input: { userId: string; videoId: string; runId: string; signal: AbortSignal }): Promise<void> {
       let processingStarted = false;
@@ -55,8 +55,8 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
         }
 
         await dependencies.state.markChunkProcessing(input.runId, chunk.index);
-        const rendered = await dependencies.media.renderChunk(run.audioPath, join(dirname(run.audioPath), `chunk-${chunk.index}.flac`), chunk.start, chunk.end - chunk.start, input.signal);
-        const result = await dependencies.asr.transcribeChunk({ audioFile: rendered.path, language: null, timestampLevel: "segment" });
+        const rendered = await dependencies.media.renderChunk(run.audioPath, join(dirname(run.audioPath), `chunk-${chunk.index}.${dependencies.audioFormat ?? "flac"}`), chunk.start, chunk.end - chunk.start, input.signal);
+        const result = await dependencies.asr.transcribeChunk({ audioFile: rendered.path, durationSeconds: chunk.end - chunk.start, signal: input.signal, language: null, timestampLevel: "segment" });
         await dependencies.state.saveChunkTranscript(input.runId, chunk.index, result.segments);
         await dependencies.state.markChunkCompleted(input.runId, chunk.index);
         completedTranscripts.push({ start: chunk.start, end: chunk.end, segments: result.segments });

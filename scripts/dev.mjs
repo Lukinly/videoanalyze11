@@ -26,9 +26,9 @@ const start = (args, cwd = root) => {
 // Compile changes as well as restarting built server processes.
 start(["node_modules/typescript/bin/tsc", "-b", "--watch", "--preserveWatchOutput"]);
 start(["--env-file-if-exists=.env", "--watch", "apps/api/dist/server.js"]);
-if (process.env.GROQ_API_KEY && (process.env.LLM_API_KEY || process.env.llm_api_key) && (process.env.LLM_API_BASE_URL || process.env.llm_api_base_url) && (process.env.LLM_API_MODEL || process.env.llm_api_model)) {
+if ((process.env.LLM_API_KEY || process.env.llm_api_key) && (process.env.LLM_API_BASE_URL || process.env.llm_api_base_url) && (process.env.LLM_API_MODEL || process.env.llm_api_model)) {
   start(["--env-file-if-exists=.env", "--watch", "apps/worker/dist/worker-main.js"]);
-} else console.log("Web/API started. Configure Groq and LLM credentials in .env, then restart to enable analysis.");
+} else console.log("Web/API started. Configure LLM credentials in .env (also used by Qwen ASR), then restart to enable analysis.");
 start(["../../node_modules/vite/bin/vite.js"], `${root}apps/web`);
 process.once("exit", () => { for (const child of children) child.kill("SIGTERM"); });
 process.once("SIGINT", () => stop());

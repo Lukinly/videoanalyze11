@@ -38,13 +38,16 @@ import { createServer as httpsServer } from "node:https";
 httpsServer({ key: readFileSync("/run/secrets/smtp_test_key"), cert: readFileSync("/run/secrets/smtp_test_cert") }, (request, response) => {
   response.setHeader("Content-Type", "application/json");
   let body = "";
-  request.on("data", (chunk) => { if (!request.url.includes("audio/transcriptions")) body += chunk; });
+  request.on("data", (chunk) => { body += chunk; });
   request.on("end", () => {
-    if (request.url.includes("audio/transcriptions")) {
-      response.end(JSON.stringify({ segments: [{ start: 0, end: 3, text: "这是 Docker 部署测试视频。" }] })); return;
-    }
     try {
-      const input = JSON.parse(body), source = JSON.parse(input.messages[1].content), segmentId = source.segments[0].id;
+      const input = JSON.parse(body);
+      if (input.model === "qwen3.8-omni-flash") {
+        response.setHeader("Content-Type", "text/event-stream");
+        const transcript = { segments: [{ start: 0, end: 3, text: "这是 Docker 部署测试视频。" }] };
+        response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(transcript) } }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`); return;
+      }
+      const source = JSON.parse(input.messages[1].content), segmentId = source.segments[0].id;
       const content = input.messages[0].content.includes("faithful study notes")
         ? { title: "部署测试笔记", topic: "容器联调", coreIdeas: ["验证完整处理流程"], sections: [{ id: "section-1", level: 1, title: "容器运行", body: "这是本地模拟 AI 生成的部署验收内容。", citations: [{ segmentId, timestampSeconds: 0 }] }], reviewPoints: ["联调已完成"] }
         : { oneLineSummary: "部署测试摘要", overallSummary: "这是部署验收视频。", chapters: [{ id: "chapter-1", title: "部署验收", sourceSegmentIds: [segmentId], summary: "验证容器处理视频。", bullets: [{ text: "联调内容", sourceSegmentIds: [segmentId] }] }] };

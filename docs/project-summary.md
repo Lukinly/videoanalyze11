@@ -30,8 +30,8 @@
 |---|---|---|
 | UI 层 | `apps/web` | React 单页应用，播放器 + 历史恢复 + 摘要/章节/转写/搜索/导出面板 |
 | 服务编排层 | `apps/api` | Fastify HTTP 服务：认证、上传、额度、任务入队、SSE、搜索、管理 |
-| 任务/媒体处理层 | `apps/worker` | BullMQ 消费端：ffmpeg 抽音频、切片、Groq 转写、LLM 摘要 |
-| AI 服务层 | `apps/worker/src/providers` | Groq ASR / DeepSeek（Anthropic 兼容）摘要，抽象为 `AsrProvider` / `SummaryProvider` |
+| 任务/媒体处理层 | `apps/worker` | BullMQ 消费端：ffmpeg 抽音频、切片、Qwen 转写、LLM 摘要 |
+| AI 服务层 | `apps/worker/src/providers` | Qwen3.8-Omni-Flash ASR / 可配置 LLM 摘要，抽象为 `AsrProvider` / `SummaryProvider` |
 | 数据存储层 | `infra` + `apps/api/src/db` | PostgreSQL / Redis / MinIO / Caddy，SQL 迁移 + 仓储模式 |
 | 契约层 | `packages/domain` | 三端共享的 zod schema、类型、错误码、provider 契约 |
 
@@ -54,7 +54,7 @@ packages/domain ──► apps/api   （schema / DomainError / 契约）
                                           MinIO(9000/9001) Mailpit(8025)
                                               │           │
                                           worker ◄──BullMQ 队列（Redis）── api
-                                          (ffmpeg + Groq + DeepSeek)
+                                          (ffmpeg + Qwen Omni + LLM)
                                               │
                                       retention sweep（临时媒体/隐私结果）
 ```
@@ -96,7 +96,7 @@ videoanlast/
 │   │       ├── analysis/        # v0-runner / transcript-merge / settlement / chunk-manifest
 │   │       ├── summary/         # v1-runner / token-budget / windowing / alignment
 │   │       ├── media/           # ffmpeg(参数构建) / ffprobe / process-runner / playback-compatibility
-│   │       ├── providers/       # groq-asr(+curl 传输) / anthropic-summary / groq-summary / http-client / summary-prompt
+│   │       ├── providers/       # qwen-omni-asr / asr-provider / anthropic-summary / openai-summary / http-client
 │   │       └── retention/       # 终态清理、定时 sweep、陈旧任务与隐私结果清理
 │   └── web/                     # @videoanalyze/web — 前端
 │       └── src/
@@ -169,8 +169,8 @@ videoanlast/
 - 每 job 编排（worker-main）：`v0 转写 → v1 摘要（可选）→ completed → 结算信用点 → 清理原片/音频/切片`；异常终态同样先持久化和结算，再清理临时媒体
 - **V0 转写**（`analysis/v0-runner.ts`）：`probing(0.02) → extracting_audio(0.1) → transcribing(0.2) → merging_transcript(0.95)`
   1. `ffmpeg` 抽音频：`-ar 16000 -ac 1 -map 0:a:0 -c:a flac`（**单声道 16kHz FLAC**）
-  2. 切片（`chunk-manifest.ts`）：600s/块、8s 重叠、`maxBytes 20MB`；超限递归二分——保证单请求低于 **Groq 25MiB 上限**
-  3. **Groq ASR**（`providers/groq-asr.ts` + `groq-asr-curl.ts`）：`POST /openai/v1/audio/transcriptions`，`verbose_json` 拿时间片段，模型 `whisper-large-v3-turbo`。**默认走 curl 而非 fetch**：key 写 0600 临时文件 `--header @file` 传递，避免进程 argv 泄露；响应头落盘解析最终状态码 + Retry-After
+  2. 切片（`chunk-manifest.ts`）：120s/块、8s 重叠、PCM WAV 上限 6MB；Base64 后低于接口 10MB 限制
+  3. **Qwen ASR**（`providers/qwen-omni-asr.ts`）：模型 `qwen3.8-omni-flash`，北京兼容接口 `POST /chat/completions`；复用 LLM key，以 Base64 WAV 输入、SSE 文本 JSON 输出。模型生成的片段相对时间经过范围校验后叠加真实片段偏移；定位精度需实测，不等同于强制对齐。
   4. 合并转录（`transcript-merge.ts`）：按起点排序、去重叠重复
 - **V1 摘要**（`summary/v1-runner.ts`）：`summarizing(0.1) → indexing(0.95)`
   - **token 预算**（`token-budget.ts`）：估算 `Σ ceil((len+24)/4)`，>60% contextWindow 走 **map-reduce** 否则单次
@@ -218,7 +218,7 @@ videoanlast/
   ▼
 worker
   │ 5. 下载视频 → ffprobe 探测 → ffmpeg 抽 mono 16kHz FLAC
-  │ 6. 切片(600s/8s/20MB) → Groq ASR(curl, whisper-large-v3-turbo) 逐块转写
+  │ 6. 切片(120s/8s/PCM WAV) → Qwen ASR(qwen3.8-omni-flash) 逐块转写
   │ 7. 合并转录 → 写 transcript_segments（<runId>_seg_N）
   │ 8. v1：compact id → DeepSeek(/v1/messages, thinking disabled) 摘要
   │    → 章节对齐(sourceSegmentIds→时间) → 写 summary_json + chapters
@@ -238,7 +238,7 @@ worker
 1. **Provider adapter + 运行时能力探测**——第三方 API 限制不写死进架构（设计文档基线）。`AsrProvider`/`SummaryProvider` 接口 + `capabilities()`（contextWindow、structuredOutput），worker 按预算决定单次或 map-reduce。
 2. **浏览器预签名与内部 client 分离**——浏览器只能用 `storage.localhost`/公共域名，绝不能用 `minio`；`S3_PUBLIC_ENDPOINT` 必须为裸 origin。
 3. **`requestChecksumCalculation: "WHEN_REQUIRED"`**——避免 AWS SDK 自动附加 `x-amz-checksum-crc32=AAAAAA==` 占位，导致浏览器直传 MinIO 失败。
-4. **Groq ASR 走 curl**——规避 fetch 的 multipart/体积限制，API key 用 0600 临时文件 + `--header @file`，不进 argv；响应头落盘解析规避代理/100-continue 干扰。
+4. **Qwen ASR 使用流式 Chat Completions**——共享 LLM key，仅文本输出且关闭思考；限制音频与响应大小，拒绝截断或无效时间戳，不记录 Base64 和上游错误正文。
 5. **DeepSeek 必须禁用 thinking**——Anthropic 兼容端点默认 thinking，会吃光 `max_tokens` 返回空 text（间歇性 `did not match schema` 的根因）；解析首个 text block 兜底。
 6. **LLM 输入用紧凑 segment id**——模型会把 `<runId>_seg_N` 截断成 `seg_N`，导致 `alignChapter` 零匹配、章节时间退化为整段；输入压缩、返回后映射回真实 id。
 7. **chapters.id 主键加 runId 前缀**——模型返回 `ch1/ch2` 非全局唯一，多 run 插入撞主键。
@@ -253,7 +253,7 @@ worker
 
 - **单元测试**：Vitest，160 个用例全绿。DB 测试用 **pg-mem** + `test-database.ts` 并行 schema；服务/路由测试用 DI 注入 fake；`media.integration.test.ts` 跑真实 ffmpeg（lavfi 1s fixture）
 - **验收测试**（`tests/acceptance/`）：除部署、HTTPS 和 V0/V1 外，覆盖断线后恢复、终态原片删除、隐私 24 小时到期、永久删除保留账本、80% 容量闸门、重复清理隔离与零上传本地挂载
-- **真实 E2E**：`corepack pnpm verify:local-upload-analysis`（需 Groq key）；成功输出只含 run ID、终态、原片删除/结果可用状态与聚合数量
+- **真实 E2E**：`corepack pnpm verify:local-upload-analysis`（需已授权 Qwen 音频模型的 LLM key）；成功输出只含 run ID、终态、原片删除/结果可用状态与聚合数量
 - **质量门槛**：`typecheck` / `lint` / `build` / `test` / `test:acceptance` / `docker compose config --quiet`
 
 发布前以当前分支的全量命令结果为准；真实验证的安全输出格式与代理清理方式见 `docs/commands.md`。
@@ -265,7 +265,7 @@ worker
 已完成（V0 + V1）：
 - ✅ 注册/登录（邮箱验证码、会话、12 欢迎额度）
 - ✅ 预签名直传 + 分析入队 + BullMQ 流水线
-- ✅ V0：ffmpeg 抽音频 + 切片 + Groq 转写 + 合并转录
+- ✅ V0：ffmpeg 抽音频 + 切片 + Qwen 转写 + 合并转录
 - ✅ V1：DeepSeek 摘要（单次/map-reduce）+ 章节对齐 + 前端展示与点击跳转
 - ✅ 信用点记账/预留/结算、管理员后台、充值审批、搜索（pg_trgm）
 - ✅ 本地 HTTPS、Caddy 反代、迁移链、部署文档

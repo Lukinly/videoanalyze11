@@ -10,6 +10,20 @@ import type { createWorkerCreditRepository } from "../credits/credit-repository.
 import type { ResultStore } from "../results/result-store.js";
 
 describe("worker database state", () => {
+  it("builds 120-second Qwen chunks so PCM Base64 stays below the provider limit", async () => {
+    const chunks: Array<{ index: number; start: number; end: number; status: string; transcriptJson: null }> = [];
+    const query = vi.fn(async (sql: string, values: unknown[]) => {
+      if (sql.includes("FROM chunks")) return { rows: chunks.slice() };
+      if (sql.includes("FROM analysis_runs")) return { rows: [{ userId: "u" }] };
+      if (sql.includes("INSERT INTO chunks")) { chunks.push({ index: values[3] as number, start: values[4] as number, end: values[5] as number, status: "pending", transcriptJson: null }); return { rows: [] }; }
+      throw new Error("unexpected query");
+    });
+    const state = createDatabaseState({ pool: { query } as unknown as Pool, s3: {} as S3Client, bucket: "test", directory: "/tmp/qwen-chunks", media: {} as ReturnType<typeof createMediaProcessor>, results: {} as ResultStore, credits: {} as ReturnType<typeof createWorkerCreditRepository>, clock: { now: () => new Date() }, chunking: { targetSeconds: 120, maxBytes: 6_000_000 } });
+    state.setRemoteInput("/tmp/source.m4a", 300);
+    const result = await state.getChunks("run");
+    expect(result.map(({ start, end }) => [start, end])).toEqual([[0, 120], [112, 232], [224, 300]]);
+    expect(result.every(({ start, end }) => Math.ceil(((end - start) * 32000 + 128) / 3) * 4 < 10_000_000)).toBe(true);
+  });
   it.each([null, 7])("probes a new upload before billing, ignoring stored duration %s", async (storedDuration) => {
     const directory = await mkdtemp(join(tmpdir(), "video-state-"));
     try {

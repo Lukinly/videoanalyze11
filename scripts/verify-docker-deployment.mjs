@@ -24,12 +24,13 @@ const env = {
   SMTP_USER: "sender@example.test", SMTP_HOST: "smtp-test", SMTP_PORT: "465", SMTP_SECURE: "true",
   MAIL_DAILY_LIMIT: "4", MAIL_RECIPIENT_DAILY_LIMIT: "2", AUTH_REQUESTS_PER_MINUTE: "100",
   LLM_API_BASE_URL: "https://smtp-test/openai/v1", LLM_API_MODEL: "smoke-test", LLM_API_PROTOCOL: "openai",
+  ASR_API_BASE_URL: "https://smtp-test/openai/v1", ASR_MODEL: "qwen3.8-omni-flash",
   S3_BUCKET: "videoanalyze", IMAGE_TAG: "local"
 };
 const dummySecrets = {
   storage_rpc_secret: randomBytes(32).toString("hex"), db_password: randomBytes(32).toString("hex"),
   s3_access_key: `GK${randomBytes(16).toString("hex")}`, s3_secret_key: randomBytes(32).toString("hex"),
-  smtp_password: "smoke-mail-password", groq_api_key: "smoke-asr-key", llm_api_key: "smoke-llm-key"
+  smtp_password: "smoke-mail-password", llm_api_key: "smoke-llm-key"
 };
 // Only synthetic credentials. World-readable files allow Docker Desktop UID mapping;
 // the host parent directory stays private. Real deployment files use mode 0600.
@@ -65,7 +66,7 @@ function messages() {
 }
 let started = false;
 try {
-  run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(directory, "smtp.key"), "-out", join(directory, "smtp.crt"), "-days", "2", "-subj", "/CN=smtp-test", "-addext", "subjectAltName=DNS:smtp-test,DNS:api.groq.com"]);
+  run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(directory, "smtp.key"), "-out", join(directory, "smtp.crt"), "-days", "2", "-subj", "/CN=smtp-test", "-addext", "subjectAltName=DNS:smtp-test"]);
   chmodSync(join(directory, "smtp.key"), 0o644);
   const config = JSON.parse(compose("config", "--format", "json"));
   for (const [name, service] of Object.entries(config.services)) {

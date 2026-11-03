@@ -20,6 +20,7 @@ export function createDatabaseState(input: {
   results: ResultStore;
   credits: ReturnType<typeof createWorkerCreditRepository>;
   clock: { now(): Date };
+  chunking?: { targetSeconds: number; maxBytes: number };
 }) {
   let cachedRun: { inputVideoPath: string; audioPath: string; duration: number } | null = null;
   async function getResultContext(runId: string) {
@@ -96,7 +97,7 @@ export function createDatabaseState(input: {
       const owner = await input.pool.query<{ userId: string }>("SELECT user_id AS \"userId\" FROM analysis_runs WHERE id = $1", [runId]);
       const userId = owner.rows[0]?.userId;
       if (!userId) throw new Error("analysis owner does not exist");
-      const manifest = buildChunkManifest({ duration: run.duration, targetSeconds: 600, overlapSeconds: 8, maxBytes: 20_000_000, estimateBytes: ({ start, end }) => Math.ceil((end - start) * 32_000) });
+      const manifest = buildChunkManifest({ duration: run.duration, targetSeconds: input.chunking?.targetSeconds ?? 600, overlapSeconds: 8, maxBytes: input.chunking?.maxBytes ?? 20_000_000, estimateBytes: ({ start, end }) => Math.ceil((end - start) * 32_000) + 128 });
       for (const chunk of manifest.chunks) {
         await input.pool.query(
           `INSERT INTO chunks (id, user_id, run_id, chunk_index, start_seconds, end_seconds, object_key, file_size, status)

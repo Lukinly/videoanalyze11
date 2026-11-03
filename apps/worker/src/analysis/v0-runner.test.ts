@@ -93,6 +93,16 @@ describe("v0 analysis runner", () => {
 
     expect(getChunks).not.toHaveBeenCalled();
   });
+
+  it("passes the exact WAV chunk duration and cancellation signal to Qwen", async () => {
+    const { createV0AnalysisRunner } = await import("./v0-runner.js");
+    const asr = { transcribeChunk: vi.fn().mockResolvedValue({ segments: [{ start: 1, end: 2, text: "Qwen transcript" }] }) };
+    const state = createFakeState();
+    const controller = new AbortController();
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn(async (_input: string, output: string) => ({ path: output, size: 100 })) };
+    await createV0AnalysisRunner({ asr, media, state, audioFormat: "wav" }).run({ userId: "u", videoId: "v", runId: "run_1", signal: controller.signal });
+    expect(asr.transcribeChunk).toHaveBeenCalledExactlyOnceWith({ audioFile: "/tmp/videoanalyze/run_1/chunk-1.wav", durationSeconds: 10, signal: controller.signal, language: null, timestampLevel: "segment" });
+  });
 });
 
 function createFakeState() {

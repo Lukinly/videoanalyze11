@@ -165,16 +165,16 @@ services:
       WORKER_NO_PROXY: "*"
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
-      GROQ_API_KEY_FILE: /run/secrets/groq_api_key
       LLM_API_KEY_FILE: /run/secrets/llm_api_key
-      GROQ_ASR_MODEL: ${GROQ_ASR_MODEL:-whisper-large-v3-turbo}
+      ASR_API_BASE_URL: ${ASR_API_BASE_URL:-https://cn-beijing.maas.qianwenaiapi.com/compatible-mode/v1}
+      ASR_MODEL: ${ASR_MODEL:-qwen3.8-omni-flash}
       LLM_API_BASE_URL: ${LLM_API_BASE_URL:?set LLM_API_BASE_URL}
       LLM_API_MODEL: ${LLM_API_MODEL:?set LLM_API_MODEL}
       LLM_API_PROTOCOL: ${LLM_API_PROTOCOL:-auto}
       GLOBAL_WORKER_CONCURRENCY: ${GLOBAL_WORKER_CONCURRENCY:-2}
       FFMPEG_CONCURRENCY: ${FFMPEG_CONCURRENCY:-1}
       LONG_VIDEO_CONCURRENCY: ${LONG_VIDEO_CONCURRENCY:-1}
-    secrets: [db_password, s3_access_key, s3_secret_key, groq_api_key, llm_api_key]
+    secrets: [db_password, s3_access_key, s3_secret_key, llm_api_key]
     depends_on:
       redis: { condition: service_healthy }
       storage-init: { condition: service_completed_successfully }
@@ -216,7 +216,6 @@ secrets:
   s3_access_key: { file: "${SECRETS_DIR:-../.local/production-secrets}/s3_access_key" }
   s3_secret_key: { file: "${SECRETS_DIR:-../.local/production-secrets}/s3_secret_key" }
   smtp_password: { file: "${SECRETS_DIR:-../.local/production-secrets}/smtp_password" }
-  groq_api_key: { file: "${SECRETS_DIR:-../.local/production-secrets}/groq_api_key" }
   llm_api_key: { file: "${SECRETS_DIR:-../.local/production-secrets}/llm_api_key" }
 
 volumes:

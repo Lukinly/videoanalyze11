@@ -13,6 +13,8 @@ export type TranscribeChunkInput = {
   language: string | null;
   timestampLevel: TimestampLevel;
   prompt?: string;
+  durationSeconds?: number;
+  signal?: AbortSignal;
 };
 
 export type TranscribeChunkResult = {

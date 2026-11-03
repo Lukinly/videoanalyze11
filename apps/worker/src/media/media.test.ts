@@ -43,6 +43,13 @@ describe("media processing", () => {
     ]);
   });
 
+  it("renders bounded PCM WAV chunks for Qwen audio input", async () => {
+    const { buildAudioChunkArgs } = await import("./ffmpeg.js");
+    expect(buildAudioChunkArgs("audio.flac", "chunk.wav", 112, 120)).toEqual([
+      "-ss", "112", "-i", "audio.flac", "-t", "120", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-y", "chunk.wav"
+    ]);
+  });
+
   it("remuxes only the first video and audio streams", async () => {
     const { buildRemuxArgs } = await import("./ffmpeg.js");
     expect(buildRemuxArgs("input.mkv", "output.mp4")).toEqual([
