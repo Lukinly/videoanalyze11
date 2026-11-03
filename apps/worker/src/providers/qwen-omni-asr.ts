@@ -1,5 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { ProviderError, type AsrProvider, type TranscribeChunkInput, type TranscribeChunkResult } from "@videoanalyze/domain";
+import { qwenAsrError, readQwenError } from "./qwen-asr-error.js";
 
 export const QWEN_ASR_BASE_URL = "https://cn-beijing.maas.qianwenaiapi.com/compatible-mode/v1";
 export const QWEN_ASR_MODEL = "qwen3.8-omni-flash";
@@ -43,10 +44,7 @@ export function createQwenOmniAsrProvider(input: { apiKey: string; baseUrl?: str
         throw new ProviderError("network_error", "Qwen ASR request could not connect or timed out");
       }
       if (!response.ok) {
-        await response.body?.cancel();
-        const kind = response.status === 401 || response.status === 403 ? "unauthorized" : response.status === 429 ? "rate_limited" : response.status >= 500 ? "server_error" : "invalid_request";
-        // Never persist the provider body: it can echo credentials or audio data.
-        throw new ProviderError(kind, `provider request failed with status ${response.status}: Qwen ASR request rejected`);
+        throw qwenAsrError(await readQwenError(response), response, false);
       }
       try { return validateSegments(JSON.parse(await readTextStream(response)), duration); }
       catch (error) {
@@ -63,10 +61,10 @@ async function readTextStream(response: Response): Promise<string> {
   if (!response.body || !response.headers.get("content-type")?.includes("text/event-stream")) throw new ProviderError("invalid_request", "Qwen ASR did not return an event stream");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = "", content = "", bytes = 0, done = false, finished = false;
+  let buffer = "", content = "", eventType = "", bytes = 0, done = false, finished = false;
   try {
     while (!done) {
-      const part = await reader.read();
+      const part = await reader.read().catch(() => { throw new ProviderError("network_error", "Qwen ASR response connection was interrupted"); });
       if (part.done) break;
       bytes += part.value.byteLength;
       if (bytes > MAX_RESPONSE_BYTES) throw new ProviderError("invalid_request", "Qwen ASR response exceeded the size limit");
@@ -74,21 +72,25 @@ async function readTextStream(response: Response): Promise<string> {
       let end: number;
       while ((end = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, end).replace(/\r$/, ""); buffer = buffer.slice(end + 1);
+        if (!line) { eventType = ""; continue; }
+        if (line.startsWith("event:")) { eventType = line.slice(6).trim(); continue; }
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (data === "[DONE]") { done = true; break; }
         if (!data) continue;
-        const event = JSON.parse(data) as { error?: unknown; choices?: Array<{ delta?: { content?: unknown }; finish_reason?: string | null }> };
-        if (event.error) throw new ProviderError("invalid_request", "Qwen ASR reported a streaming error");
+        const event = JSON.parse(data) as { error?: unknown; code?: unknown; choices?: Array<{ delta?: { content?: unknown }; finish_reason?: string | null }> };
+        if (event.error || eventType === "error" || (event.code && !event.choices)) throw qwenAsrError(event, response, true);
         const choice = event.choices?.[0];
         if (typeof choice?.delta?.content === "string") content += choice.delta.content;
         if (choice?.finish_reason) {
+          if (choice.finish_reason === "content_filter") throw qwenAsrError({ error: { code: "content_filter" } }, response, true);
           if (choice.finish_reason !== "stop") throw new ProviderError("invalid_request", "Qwen ASR response was interrupted or truncated");
           finished = true;
         }
       }
     }
-    if (!done || !finished || !content.trim()) throw new ProviderError("invalid_request", "Qwen ASR response ended before completion");
+    if (!done || !finished) throw new ProviderError("network_error", "Qwen ASR response ended before completion");
+    if (!content.trim()) throw new ProviderError("invalid_request", "Qwen ASR response contained no transcription JSON");
     return content;
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }

@@ -6,6 +6,7 @@ import { createV0AnalysisRunner } from "./analysis/v0-runner.js";
 import { createMediaProcessor } from "./media/media-processor.js";
 import { QWEN_ASR_CHUNK_SECONDS, QWEN_ASR_MAX_BYTES } from "./providers/qwen-omni-asr.js";
 import { createConfiguredAsrProvider } from "./providers/asr-provider.js";
+import { QwenAsrError } from "./providers/qwen-asr-error.js";
 import { createSummaryProvider } from "./providers/summary-provider.js";
 import { createV1SummaryRunner } from "./summary/v1-runner.js";
 import { createNotesRunner } from "./notes/notes-runner.js";
@@ -143,6 +144,7 @@ const consumer = createAnalysisConsumer({
           markCompleted: () => state.markCompleted(job.runId),
           async markFailedOrCancelled(error) {
             const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
+            if (error instanceof QwenAsrError) console.error(JSON.stringify({ event: "asr_provider_failed", runId: job.runId, kind: error.code, httpStatus: error.httpStatus, providerCode: error.providerCode ?? "unrecognized", requestId: error.requestId }));
             const result = await pool.query<{ status: string }>(
               `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
                WHERE id = $1 AND status IN ('queued', 'running', 'cancelling') RETURNING status`,

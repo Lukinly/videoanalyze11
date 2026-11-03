@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
-import type { AsrProvider } from "@videoanalyze/domain";
+import { setTimeout as delay } from "node:timers/promises";
+import { classifyProviderFailure, getRetryDecision, type AsrProvider } from "@videoanalyze/domain";
 import { mergeChunkTranscripts } from "./transcript-merge.js";
 import { AnalysisCancelledError, cancellationOutcome } from "./cancellation.js";
 import { requireStageUpdate } from "./stage-fence.js";
@@ -29,7 +30,7 @@ type Media = {
   renderChunk(audioPath: string, outputPath: string, start: number, duration: number, signal?: AbortSignal): Promise<{ path: string; size: number }>;
 };
 
-export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState; audioFormat?: "wav" | "flac" }) {
+export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState; audioFormat?: "wav" | "flac"; waitForRetry?: (ms: number, signal: AbortSignal) => Promise<void> }) {
   return {
     async run(input: { userId: string; videoId: string; runId: string; signal: AbortSignal }): Promise<void> {
       let processingStarted = false;
@@ -56,7 +57,27 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
 
         await dependencies.state.markChunkProcessing(input.runId, chunk.index);
         const rendered = await dependencies.media.renderChunk(run.audioPath, join(dirname(run.audioPath), `chunk-${chunk.index}.${dependencies.audioFormat ?? "flac"}`), chunk.start, chunk.end - chunk.start, input.signal);
-        const result = await dependencies.asr.transcribeChunk({ audioFile: rendered.path, durationSeconds: chunk.end - chunk.start, signal: input.signal, language: null, timestampLevel: "segment" });
+        const result = await transcribeWithRetry();
+        async function transcribeWithRetry() {
+          for (let attempt = 1; ; attempt++) {
+            await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
+            try {
+              return await dependencies.asr.transcribeChunk({ audioFile: rendered.path, durationSeconds: chunk.end - chunk.start, signal: input.signal, language: null, timestampLevel: "segment" });
+            } catch (error) {
+              await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
+              const failure = classifyProviderFailure(error);
+              const decision = getRetryDecision(failure, attempt);
+              if (!decision.retry) throw error;
+              const delayMs = Math.min(30_000, Math.max(decision.delayMs, failure.kind === "rate_limited" ? 5_000 * attempt : 0));
+              const wait = dependencies.waitForRetry ?? ((ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }));
+              try { await wait(delayMs, input.signal); }
+              catch (waitError) {
+                await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
+                throw waitError;
+              }
+            }
+          }
+        }
         await dependencies.state.saveChunkTranscript(input.runId, chunk.index, result.segments);
         await dependencies.state.markChunkCompleted(input.runId, chunk.index);
         completedTranscripts.push({ start: chunk.start, end: chunk.end, segments: result.segments });

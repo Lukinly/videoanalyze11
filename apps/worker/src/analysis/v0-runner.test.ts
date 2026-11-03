@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { ProviderError } from "@videoanalyze/domain";
+import { createV0AnalysisRunner } from "./v0-runner.js";
 
 describe("v0 analysis runner", () => {
   it("marks a run as probing before loading the source media", async () => {
@@ -102,6 +104,53 @@ describe("v0 analysis runner", () => {
     const media = { extractAudio: vi.fn(), renderChunk: vi.fn(async (_input: string, output: string) => ({ path: output, size: 100 })) };
     await createV0AnalysisRunner({ asr, media, state, audioFormat: "wav" }).run({ userId: "u", videoId: "v", runId: "run_1", signal: controller.signal });
     expect(asr.transcribeChunk).toHaveBeenCalledExactlyOnceWith({ audioFile: "/tmp/videoanalyze/run_1/chunk-1.wav", durationSeconds: 10, signal: controller.signal, language: null, timestampLevel: "segment" });
+  });
+
+  it("retries only the current chunk after temporary stream errors without rendering or saving it twice", async () => {
+    const state = createFakeState();
+    const asr = { transcribeChunk: vi.fn().mockRejectedValueOnce(new ProviderError("server_error", "temporary stream failure")).mockRejectedValueOnce(new ProviderError("rate_limited", "slow down")).mockResolvedValue({ segments: [] }) };
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn().mockResolvedValue({ path: "/tmp/chunk.wav", size: 100 }) };
+    const waitForRetry = vi.fn().mockResolvedValue(undefined);
+    const signal = new AbortController().signal;
+    await createV0AnalysisRunner({ asr, media, state, waitForRetry }).run({ userId: "u", videoId: "v", runId: "run_1", signal });
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(3);
+    expect(media.renderChunk).toHaveBeenCalledTimes(1);
+    expect(waitForRetry.mock.calls).toEqual([[1000, signal], [10000, signal]]);
+    expect(state.savedChunkIndexes).toEqual([1]);
+    expect(state.completedChunkIndexes).toEqual([0, 1]);
+  });
+
+  it.each([["server_error", 3], ["unauthorized", 1], ["invalid_request", 1]] as const)("bounds retries of %s to %s attempts and preserves completed chunks", async (kind, attempts) => {
+    const state = createFakeState();
+    const error = new ProviderError(kind, "final safe failure");
+    const asr = { transcribeChunk: vi.fn().mockRejectedValue(error) };
+    const waitForRetry = vi.fn().mockResolvedValue(undefined);
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn().mockResolvedValue({ path: "/tmp/chunk.wav", size: 100 }) };
+    await expect(createV0AnalysisRunner({ asr, media, state, waitForRetry }).run({ userId: "u", videoId: "v", runId: "run_1", signal: new AbortController().signal })).rejects.toBe(error);
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(attempts);
+    expect(state.savedChunkIndexes).toEqual([]);
+    expect(state.completedChunkIndexes).toEqual([0]);
+  });
+
+  it("honors database cancellation during retry backoff", async () => {
+    const state = { ...createFakeState(), isCancelling: vi.fn().mockResolvedValue(false) };
+    const asr = { transcribeChunk: vi.fn().mockRejectedValue(new ProviderError("network_error", "disconnected")) };
+    const waitForRetry = vi.fn(async () => { state.isCancelling.mockResolvedValue(true); });
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn().mockResolvedValue({ path: "/tmp/chunk.wav", size: 100 }) };
+    await expect(createV0AnalysisRunner({ asr, media, state, waitForRetry }).run({ userId: "u", videoId: "v", runId: "run_1", signal: new AbortController().signal })).rejects.toMatchObject({ name: "AnalysisCancelledError" });
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(1);
+    expect(state.savedChunkIndexes).toEqual([]);
+  });
+
+  it("cancels an in-progress retry wait without starting another request", async () => {
+    const state = createFakeState();
+    const controller = new AbortController();
+    const asr = { transcribeChunk: vi.fn().mockRejectedValue(new ProviderError("server_error", "unavailable")) };
+    const waitForRetry = vi.fn(async () => { controller.abort(); throw controller.signal.reason; });
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn().mockResolvedValue({ path: "/tmp/chunk.wav", size: 100 }) };
+    await expect(createV0AnalysisRunner({ asr, media, state, waitForRetry }).run({ userId: "u", videoId: "v", runId: "run_1", signal: controller.signal })).rejects.toMatchObject({ name: "AnalysisCancelledError" });
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(1);
+    expect(state.savedChunkIndexes).toEqual([]);
   });
 });
 

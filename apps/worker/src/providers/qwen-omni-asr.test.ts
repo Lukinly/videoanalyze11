@@ -60,10 +60,10 @@ describe("Qwen Omni audio transcription", () => {
       await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code: "invalid_request" });
     });
   });
-  it.each([{ finish: "length" }, { done: false }])("rejects truncated streams: %j", async (options) => {
+  it.each([{ options: { finish: "length" }, code: "invalid_request" }, { options: { done: false }, code: "network_error" }])("rejects truncated streams: %j", async ({ options, code }) => {
     await withAudio(async (audioFile) => {
       const provider = createQwenOmniAsrProvider({ apiKey: "key", fetchImpl: vi.fn().mockResolvedValue(events(transcript, options)) });
-      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code });
     });
   });
   it("accepts silence as an empty transcript without fabricating words", async () => {
@@ -92,6 +92,54 @@ describe("Qwen Omni audio transcription", () => {
       const controller = new AbortController();
       const fetchImpl = vi.fn(async (_url, init) => { controller.abort(new Error("cancelled")); throw init.signal.reason; });
       await expect(createQwenOmniAsrProvider({ apiKey: "key", fetchImpl }).transcribeChunk({ audioFile, durationSeconds: 2, signal: controller.signal, language: null, timestampLevel: "segment" })).rejects.toThrow("cancelled");
+    });
+  });
+
+  it.each([
+    ["InternalError", "server_error"], ["Throttling.RateQuota", "rate_limited"],
+    ["DataInspectionFailed", "invalid_request"], ["Throttling.AllocationQuota", "invalid_request"],
+    ["InvalidApiKey", "unauthorized"], ["unknown-secret-sentinel", "invalid_request"]
+  ])("classifies streaming %s without storing upstream messages", async (code, kind) => {
+    await withAudio(async (audioFile) => {
+      const id = "761fcd5e-071f-4ef0-8564-fbc7855a7650";
+      const body = `data: ${JSON.stringify({ error: { code, message: "secret-sentinel audio-base64-sentinel" }, request_id: id })}\n\n`;
+      const provider = createQwenOmniAsrProvider({ apiKey: "secret-sentinel", fetchImpl: vi.fn().mockResolvedValue(new Response(body, { headers: { "content-type": "text/event-stream" } })) });
+      const error = await provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" }).catch((error: Error) => error);
+      expect(error).toMatchObject({ code: kind, message: expect.stringContaining(`request_id=${id}`) });
+      expect((error as Error).message).toContain(`code=${code === "unknown-secret-sentinel" ? "unrecognized" : code}`);
+      expect(JSON.stringify(error)).not.toMatch(/secret-sentinel|audio-base64-sentinel/);
+    });
+  });
+
+  it("bounds Retry-After and recognizes nonretryable exhausted quota even with HTTP 429", async () => {
+    await withAudio(async (audioFile) => {
+      const provider = createQwenOmniAsrProvider({ apiKey: "key", fetchImpl: vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "insufficient_quota", message: "secret-sentinel" } }), { status: 429, headers: { "retry-after": "999999", "x-request-id": "secret-sentinel" } })) });
+      const error = await provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" }).catch((error: Error) => error);
+      expect(error).toMatchObject({ code: "invalid_request", retryAfterMs: 30_000 });
+      expect((error as Error).message).not.toContain("secret-sentinel");
+    });
+  });
+
+  it("recognizes named SSE error frames with a top-level code", async () => {
+    await withAudio(async (audioFile) => {
+      const body = 'event: error\ndata: {"code":"ServiceUnavailable","message":"secret-sentinel"}\n\n';
+      const provider = createQwenOmniAsrProvider({ apiKey: "key", fetchImpl: vi.fn().mockResolvedValue(new Response(body, { headers: { "content-type": "text/event-stream" } })) });
+      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code: "server_error", providerCode: "ServiceUnavailable", message: "Qwen ASR streaming error (code=ServiceUnavailable)" });
+    });
+  });
+
+  it("classifies a broken streaming transport as retryable", async () => {
+    await withAudio(async (audioFile) => {
+      const body = new ReadableStream({ start(controller) { controller.error(new TypeError("secret-sentinel")); } });
+      const provider = createQwenOmniAsrProvider({ apiKey: "key", fetchImpl: vi.fn().mockResolvedValue(new Response(body, { headers: { "content-type": "text/event-stream" } })) });
+      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code: "network_error", message: "Qwen ASR response connection was interrupted" });
+    });
+  });
+
+  it("bounds error body reads and does not persist oversized provider echoes", async () => {
+    await withAudio(async (audioFile) => {
+      const provider = createQwenOmniAsrProvider({ apiKey: "key", fetchImpl: vi.fn().mockResolvedValue(new Response("secret-sentinel".repeat(2000), { status: 503 })) });
+      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code: "server_error", message: "provider request failed with status 503: Qwen ASR request rejected" });
     });
   });
 });
