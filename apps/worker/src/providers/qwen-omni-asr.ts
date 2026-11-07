@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { ProviderError, type AsrProvider, type TranscribeChunkInput, type TranscribeChunkResult } from "@videoanalyze/domain";
 import { qwenAsrError, readQwenError } from "./qwen-asr-error.js";
+import { InvalidProviderOutputError } from "./provider-request.js";
 
 export const QWEN_ASR_BASE_URL = "https://cn-beijing.maas.qianwenaiapi.com/compatible-mode/v1";
 export const QWEN_ASR_MODEL = "qwen3.8-omni-flash";
@@ -51,7 +52,7 @@ export function createQwenOmniAsrProvider(input: { apiKey: string; baseUrl?: str
         chunk.signal?.throwIfAborted();
         if (error instanceof ProviderError) throw error;
         if (signal.aborted) throw new ProviderError("network_error", "Qwen ASR response timed out");
-        throw new ProviderError("invalid_request", "Qwen ASR returned invalid transcription JSON");
+        throw new InvalidProviderOutputError("Qwen ASR returned invalid transcription JSON");
       }
     }
   };
@@ -67,7 +68,7 @@ async function readTextStream(response: Response): Promise<string> {
       const part = await reader.read().catch(() => { throw new ProviderError("network_error", "Qwen ASR response connection was interrupted"); });
       if (part.done) break;
       bytes += part.value.byteLength;
-      if (bytes > MAX_RESPONSE_BYTES) throw new ProviderError("invalid_request", "Qwen ASR response exceeded the size limit");
+      if (bytes > MAX_RESPONSE_BYTES) throw new InvalidProviderOutputError("Qwen ASR response exceeded the size limit");
       buffer += decoder.decode(part.value, { stream: true });
       let end: number;
       while ((end = buffer.indexOf("\n")) >= 0) {
@@ -84,24 +85,24 @@ async function readTextStream(response: Response): Promise<string> {
         if (typeof choice?.delta?.content === "string") content += choice.delta.content;
         if (choice?.finish_reason) {
           if (choice.finish_reason === "content_filter") throw qwenAsrError({ error: { code: "content_filter" } }, response, true);
-          if (choice.finish_reason !== "stop") throw new ProviderError("invalid_request", "Qwen ASR response was interrupted or truncated");
+          if (choice.finish_reason !== "stop") throw new InvalidProviderOutputError("Qwen ASR response was interrupted or truncated");
           finished = true;
         }
       }
     }
     if (!done || !finished) throw new ProviderError("network_error", "Qwen ASR response ended before completion");
-    if (!content.trim()) throw new ProviderError("invalid_request", "Qwen ASR response contained no transcription JSON");
+    if (!content.trim()) throw new InvalidProviderOutputError("Qwen ASR response contained no transcription JSON");
     return content;
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 
 function validateSegments(payload: unknown, duration: number): TranscribeChunkResult {
   const segments = typeof payload === "object" && payload !== null ? (payload as { segments?: unknown }).segments : undefined;
-  if (!Array.isArray(segments) || segments.length > 2000) throw new ProviderError("invalid_request", "Qwen ASR response omitted valid segments");
+  if (!Array.isArray(segments) || segments.length > 2000) throw new InvalidProviderOutputError("Qwen ASR response omitted valid segments");
   let previousStart = -1;
   return { segments: segments.map((value: unknown) => {
     const segment = value as { start?: unknown; end?: unknown; text?: unknown } | null;
-    if (!segment || typeof segment.start !== "number" || typeof segment.end !== "number" || !Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.start < 0 || segment.end > duration || segment.end <= segment.start || segment.start < previousStart || typeof segment.text !== "string" || !segment.text.trim()) throw new ProviderError("invalid_request", "Qwen ASR timestamps or transcript segments are invalid");
+    if (!segment || typeof segment.start !== "number" || typeof segment.end !== "number" || !Number.isFinite(segment.start) || !Number.isFinite(segment.end) || segment.start < 0 || segment.end > duration || segment.end <= segment.start || segment.start < previousStart || typeof segment.text !== "string" || !segment.text.trim()) throw new InvalidProviderOutputError("Qwen ASR timestamps or transcript segments are invalid");
     previousStart = segment.start;
     return { start: segment.start, end: segment.end, text: segment.text.trim() };
   }) };

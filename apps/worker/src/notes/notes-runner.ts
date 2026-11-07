@@ -13,6 +13,7 @@ type NotesState = {
 export function createNotesRunner(dependencies: { notes: AiNotesProvider; state: NotesState; captureFrame?: (seconds: number) => Promise<string> }) {
   return {
     async run(input: { runId: string; signal?: AbortSignal }): Promise<AiNotes> {
+      input.signal?.throwIfAborted();
       await requireStageUpdate(() => dependencies.state.setStage(input.runId, "generating_notes", 0.1));
       const transcript = await dependencies.state.getTranscript(input.runId);
       const realByCompact = new Map<string, TranscriptSegment>();
@@ -24,8 +25,8 @@ export function createNotesRunner(dependencies: { notes: AiNotesProvider; state:
       const capabilities = await dependencies.notes.capabilities();
       const inputBudget = Math.max(1, Math.floor(capabilities.contextWindow * 0.6));
       const generated = estimateTranscriptTokens(compactSegments) > inputBudget
-        ? await mapReduceNotes(dependencies.notes, transcript.duration, compactSegments)
-        : await dependencies.notes.generateNotes({ videoDuration: transcript.duration, segments: compactSegments });
+        ? await mapReduceNotes(dependencies.notes, transcript.duration, compactSegments, input.signal)
+        : await dependencies.notes.generateNotes({ videoDuration: transcript.duration, segments: compactSegments, signal: input.signal });
       const normalized = normalizeNotes(generated, (id) => {
         const real = realByCompact.get(id);
         return real ? [{ segmentId: real.id, timestampSeconds: real.start }] : [];
@@ -39,10 +40,14 @@ export function createNotesRunner(dependencies: { notes: AiNotesProvider; state:
   };
 }
 
-async function mapReduceNotes(provider: AiNotesProvider, duration: number, segments: TranscriptSegment[]): Promise<AiNotes> {
+async function mapReduceNotes(provider: AiNotesProvider, duration: number, segments: TranscriptSegment[], signal?: AbortSignal): Promise<AiNotes> {
   const capabilities = await provider.capabilities();
   const windows = createSummaryWindows(segments, capabilities.contextWindow);
-  const mapped = await Promise.all(windows.map((window) => provider.generateNotes({ videoDuration: duration, segments: window.segments })));
+  const mapped: AiNotes[] = [];
+  for (const window of windows) {
+    signal?.throwIfAborted();
+    mapped.push(await provider.generateNotes({ videoDuration: duration, segments: window.segments, signal }));
+  }
   const sources = new Map<string, string[]>();
   const reductionSegments = mapped.flatMap((notes, notesIndex) => notes.sections.map((section, sectionIndex) => {
     const id = `map-${notesIndex}-${sectionIndex}`;
@@ -50,7 +55,7 @@ async function mapReduceNotes(provider: AiNotesProvider, duration: number, segme
     return { id, runId: segments[0]?.runId ?? "notes", start: 0, end: duration, text: `${section.title}\n${section.body}` };
   }));
   if (reductionSegments.length === 0) throw new Error("AI notes map step produced no sections");
-  const reduced = await provider.generateNotes({ videoDuration: duration, segments: reductionSegments });
+  const reduced = await provider.generateNotes({ videoDuration: duration, segments: reductionSegments, signal });
   return normalizeNotes(reduced, (id) => (sources.get(id) ?? []).map((segmentId) => ({ segmentId, timestampSeconds: 0 })));
 }
 

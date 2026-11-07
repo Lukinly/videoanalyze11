@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createQwenOmniAsrProvider, QWEN_ASR_MAX_BYTES } from "./qwen-omni-asr.js";
+import { InvalidProviderOutputError } from "./provider-request.js";
 
 const transcript = { segments: [{ start: 0.2, end: 1.5, text: "你好，世界😀" }] };
 function events(payload: unknown, options: { finish?: string; done?: boolean; oneByte?: boolean } = {}) {
@@ -57,7 +58,7 @@ describe("Qwen Omni audio transcription", () => {
   ])("rejects invalid timestamps instead of inventing timing: %j", async (payload) => {
     await withAudio(async (audioFile) => {
       const provider = createQwenOmniAsrProvider({ apiKey: "key", fetchImpl: vi.fn().mockResolvedValue(events(payload)) });
-      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(provider.transcribeChunk({ audioFile, durationSeconds: 2, language: null, timestampLevel: "segment" })).rejects.toBeInstanceOf(InvalidProviderOutputError);
     });
   });
   it.each([{ options: { finish: "length" }, code: "invalid_request" }, { options: { done: false }, code: "network_error" }])("rejects truncated streams: %j", async ({ options, code }) => {

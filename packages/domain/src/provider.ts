@@ -30,6 +30,7 @@ export type SummaryCapabilities = {
 export type SummaryInput = {
   videoDuration: number;
   segments: TranscriptSegment[];
+  signal?: AbortSignal;
 };
 
 export interface AsrProvider {

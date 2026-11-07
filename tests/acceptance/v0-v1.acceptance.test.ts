@@ -6,6 +6,7 @@ import { createV0AnalysisRunner } from "../../apps/worker/src/analysis/v0-runner
 import { alignChapter } from "../../apps/worker/src/summary/alignment.js";
 import { createV1SummaryRunner } from "../../apps/worker/src/summary/v1-runner.js";
 import { parseFfprobeJson } from "../../apps/worker/src/media/ffprobe.js";
+import { createOpenAiSummaryProvider } from "../../apps/worker/src/providers/openai-summary.js";
 
 const requiredScenarios = [
   "verified user receives exactly twelve credits",
@@ -62,10 +63,14 @@ async function runAcceptanceScenario(scenario: typeof requiredScenarios[number])
       return { status: "passed" as const };
     }
     case "429 and network timeout retry without leaking secrets": {
-      const summary = { capabilities: vi.fn().mockResolvedValue({ contextWindow: 10_000, structuredOutput: true }), summarize: vi.fn().mockRejectedValueOnce(new Error("429")).mockResolvedValueOnce({ oneLineSummary: "ok", overallSummary: "ok", chapters: [] }) };
+      const fetchImpl = vi.fn().mockResolvedValueOnce(new Response("secret-sentinel", { status: 429 }))
+        .mockRejectedValueOnce(new DOMException("request timed out", "TimeoutError"))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ oneLineSummary: "ok", overallSummary: "ok", chapters: [] }) } }] })));
+      const summary = createOpenAiSummaryProvider({ apiKey: "secret-sentinel", baseUrl: "https://example.test", model: "model", fetchImpl, waitForRetry: vi.fn().mockResolvedValue(undefined) });
       const state = { getTranscript: vi.fn().mockResolvedValue({ duration: 1, segments: [] }), setStage: vi.fn().mockResolvedValue(true), saveSummary: vi.fn() };
       await createV1SummaryRunner({ summary, state }).run({ runId: "r1" });
-      expect(summary.summarize).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(JSON.stringify(state.saveSummary.mock.calls)).not.toContain("secret-sentinel");
       return { status: "passed" as const };
     }
     case "no-audio video fails with actionable error": {

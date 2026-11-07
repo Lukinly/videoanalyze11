@@ -45,7 +45,7 @@ describe("OpenAI-compatible summary and notes", () => {
   });
 
   it("rejects invalid structured output", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(response({}));
+    const fetchImpl = vi.fn().mockImplementation(async () => response({}));
     await expect(createOpenAiSummaryProvider({ baseUrl: "https://example.test/v1", apiKey: "test", model: "model", fetchImpl }).summarize(transcript)).rejects.toMatchObject({ code: "invalid_request" });
   });
 

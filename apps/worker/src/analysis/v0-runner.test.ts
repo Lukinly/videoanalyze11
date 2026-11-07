@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { InvalidProviderOutputError } from "../providers/provider-request.js";
 import { ProviderError } from "@videoanalyze/domain";
 import { createV0AnalysisRunner } from "./v0-runner.js";
 
@@ -140,6 +141,42 @@ describe("v0 analysis runner", () => {
     await expect(createV0AnalysisRunner({ asr, media, state, waitForRetry }).run({ userId: "u", videoId: "v", runId: "run_1", signal: new AbortController().signal })).rejects.toMatchObject({ name: "AnalysisCancelledError" });
     expect(asr.transcribeChunk).toHaveBeenCalledTimes(1);
     expect(state.savedChunkIndexes).toEqual([]);
+  });
+
+  it("recovers malformed ASR output by retrying only the current chunk", async () => {
+    const state = createFakeState();
+    const asr = { transcribeChunk: vi.fn().mockRejectedValueOnce(new InvalidProviderOutputError("Qwen ASR response omitted valid segments")).mockResolvedValue({ segments: [] }) };
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn().mockResolvedValue({ path: "/tmp/chunk.wav", size: 100 }) };
+    await createV0AnalysisRunner({ asr, media, state, waitForRetry: vi.fn().mockResolvedValue(undefined) }).run({ userId: "u", videoId: "v", runId: "run_1", signal: new AbortController().signal });
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(2);
+    expect(media.renderChunk).toHaveBeenCalledTimes(1);
+    expect(state.savedChunkIndexes).toEqual([1]);
+  });
+
+  it("splits persistently malformed audio once and restores offsets before saving the original chunk", async () => {
+    const state = { ...createFakeState(),
+      getRun: vi.fn().mockResolvedValue({ inputVideoPath: "/tmp/original", audioPath: "/tmp/audio.flac", duration: 680 }),
+      getChunks: vi.fn().mockResolvedValue([{ index: 5, start: 560, end: 680, status: "pending", transcript: null }]),
+      saveChunkTranscript: vi.fn()
+    };
+    const malformed = new InvalidProviderOutputError("Qwen ASR response omitted valid segments");
+    const asr = { transcribeChunk: vi.fn().mockRejectedValueOnce(malformed).mockRejectedValueOnce(malformed).mockRejectedValueOnce(malformed)
+      .mockResolvedValue({ segments: [{ start: 1, end: 10, text: "speech" }] }) };
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn(async (_audio, path) => ({ path, size: 100 })) };
+    await createV0AnalysisRunner({ asr, media, state, audioFormat: "wav", waitForRetry: vi.fn().mockResolvedValue(undefined) }).run({ userId: "u", videoId: "v", runId: "run_1", signal: new AbortController().signal });
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(5);
+    expect(media.renderChunk.mock.calls.map((call) => call.slice(2, 4))).toEqual([[560, 120], [560, 60], [620, 60]]);
+    expect(state.saveChunkTranscript).toHaveBeenCalledExactlyOnceWith("run_1", 5, [{ start: 1, end: 10, text: "speech" }, { start: 61, end: 70, text: "speech" }]);
+  });
+
+  it("bounds the split fallback and never saves a partial transcript", async () => {
+    const state = { ...createFakeState(), getChunks: vi.fn().mockResolvedValue([{ index: 0, start: 0, end: 120, status: "pending", transcript: null }]), saveChunkTranscript: vi.fn() };
+    const asr = { transcribeChunk: vi.fn().mockRejectedValue(new InvalidProviderOutputError("bad output")) };
+    const media = { extractAudio: vi.fn(), renderChunk: vi.fn(async (_audio, path) => ({ path, size: 100 })) };
+    await expect(createV0AnalysisRunner({ asr, media, state, waitForRetry: vi.fn().mockResolvedValue(undefined) }).run({ userId: "u", videoId: "v", runId: "run_1", signal: new AbortController().signal })).rejects.toBeInstanceOf(InvalidProviderOutputError);
+    expect(asr.transcribeChunk).toHaveBeenCalledTimes(6);
+    expect(media.renderChunk).toHaveBeenCalledTimes(2);
+    expect(state.saveChunkTranscript).not.toHaveBeenCalled();
   });
 
   it("cancels an in-progress retry wait without starting another request", async () => {

@@ -10,7 +10,8 @@ import { QwenAsrError } from "./providers/qwen-asr-error.js";
 import { createSummaryProvider } from "./providers/summary-provider.js";
 import { createV1SummaryRunner } from "./summary/v1-runner.js";
 import { createNotesRunner } from "./notes/notes-runner.js";
-import { MAX_VIDEO_DURATION_SECONDS } from "@videoanalyze/domain";
+import { classifyProviderFailure, MAX_VIDEO_DURATION_SECONDS } from "@videoanalyze/domain";
+import { InvalidProviderOutputError } from "./providers/provider-request.js";
 import { createWorkerCreditRepository } from "./credits/credit-repository.js";
 import { AnalysisCancelledError } from "./analysis/cancellation.js";
 import { settleAnalysisFailure, settleAnalysisSuccess } from "./analysis/settlement.js";
@@ -124,9 +125,9 @@ const consumer = createAnalysisConsumer({
               }
             }
             const process = async () => {
-              if (!transcriptImported) await createV0AnalysisRunner({ asr, media, state, audioFormat: "wav" }).run(job);
+              if (!transcriptImported) await createV0AnalysisRunner({ asr, media, state, audioFormat: "wav", onRecovery: (event) => console.warn(JSON.stringify({ event: "asr_chunk_recovery", runId: job.runId, ...event })) }).run(job);
               if (!summaryProvider) throw new Error("summary and AI notes provider is required");
-              await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId });
+              await createV1SummaryRunner({ summary: summaryProvider, state }).run({ runId: job.runId, signal: job.signal });
               // Resolve video only when notes are ready, since remote URLs expire.
               // A rejected promise is cached too, avoiding repeated blocked requests.
               let frameSource: Promise<{ path: string; headers?: Record<string, string> }> | undefined;
@@ -145,11 +146,12 @@ const consumer = createAnalysisConsumer({
           async markFailedOrCancelled(error) {
             const status = error instanceof AnalysisCancelledError ? "cancelled" : "failed";
             if (error instanceof QwenAsrError) console.error(JSON.stringify({ event: "asr_provider_failed", runId: job.runId, kind: error.code, httpStatus: error.httpStatus, providerCode: error.providerCode ?? "unrecognized", requestId: error.requestId }));
-            const result = await pool.query<{ status: string }>(
+            const result = await pool.query<{ status: string; stage: string }>(
               `UPDATE analysis_runs SET status = $2, error = $3, updated_at = $4
-               WHERE id = $1 AND status IN ('queued', 'running', 'cancelling') RETURNING status`,
+               WHERE id = $1 AND status IN ('queued', 'running', 'cancelling') RETURNING status, stage`,
               [job.runId, status, error instanceof Error ? error.message : "analysis failed", clock.now()]
             );
+            console.error(JSON.stringify({ event: "analysis_terminal_failure", runId: job.runId, status, stage: result.rows[0]?.stage, kind: error instanceof InvalidProviderOutputError ? "invalid_output" : classifyProviderFailure(error).kind }));
             return result.rowCount === 1 && result.rows[0]?.status === status;
           },
           settleSuccess: () => settleAnalysisSuccess({ runId: job.runId, credits }),

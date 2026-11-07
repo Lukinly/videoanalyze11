@@ -28,7 +28,7 @@ describe("anthropic-compatible summary provider", () => {
 
   it("authenticates with x-api-key, never Authorization", async () => {
     const { createAnthropicSummaryProvider } = await import("./anthropic-summary.js");
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: [{ type: "text", text: "{}" }] }), { status: 200 }));
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ content: [{ type: "text", text: "{}" }] }), { status: 200 }));
     const provider = createAnthropicSummaryProvider({ apiKey: "test-key", baseUrl: "https://api.deepseek.com/anthropic", model: "m", fetchImpl });
 
     await expect(provider.summarize({ videoDuration: 1, segments: [] })).rejects.toMatchObject({ code: "invalid_request" });
@@ -39,7 +39,7 @@ describe("anthropic-compatible summary provider", () => {
 
   it("rejects malformed JSON with invalid_request", async () => {
     const { createAnthropicSummaryProvider } = await import("./anthropic-summary.js");
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: [{ type: "text", text: "not json" }] }), { status: 200 }));
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ content: [{ type: "text", text: "not json" }] }), { status: 200 }));
     const provider = createAnthropicSummaryProvider({ apiKey: "test-key", baseUrl: "https://api.deepseek.com/anthropic", model: "m", fetchImpl });
 
     await expect(provider.summarize({ videoDuration: 20, segments: [{ id: "s", runId: "r", start: 0, end: 20, text: "t" }] })).rejects.toMatchObject({ code: "invalid_request" });

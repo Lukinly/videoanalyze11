@@ -1,10 +1,11 @@
 import { ProviderError, type ProviderFailureKind } from "@videoanalyze/domain";
 
 export function providerErrorFromResponse(response: Response, body: string): ProviderError {
+  void body; // Upstream bodies may echo credentials or transcript content.
   const code = statusToCode(response.status);
   const retryAfterHeader = response.headers.get("retry-after");
   const retryAfterMs = retryAfterHeader ? Number.isFinite(Number(retryAfterHeader)) ? Number(retryAfterHeader) * 1000 : undefined : undefined;
-  return new ProviderError(code, `provider request failed with status ${response.status}: ${body.slice(0, 200)}`, { retryAfterMs });
+  return new ProviderError(code, `provider request failed with status ${response.status}`, { retryAfterMs });
 }
 
 function statusToCode(status: number): ProviderFailureKind {

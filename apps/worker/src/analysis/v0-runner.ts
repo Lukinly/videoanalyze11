@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { classifyProviderFailure, getRetryDecision, type AsrProvider } from "@videoanalyze/domain";
+import { classifyProviderFailure, getRetryDecision, type AsrProvider, type TranscribeChunkResult } from "@videoanalyze/domain";
+import { InvalidProviderOutputError } from "../providers/provider-request.js";
 import { mergeChunkTranscripts } from "./transcript-merge.js";
 import { AnalysisCancelledError, cancellationOutcome } from "./cancellation.js";
 import { requireStageUpdate } from "./stage-fence.js";
@@ -30,7 +31,7 @@ type Media = {
   renderChunk(audioPath: string, outputPath: string, start: number, duration: number, signal?: AbortSignal): Promise<{ path: string; size: number }>;
 };
 
-export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState; audioFormat?: "wav" | "flac"; waitForRetry?: (ms: number, signal: AbortSignal) => Promise<void> }) {
+export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "transcribeChunk">; media: Media; state: RunnerState; audioFormat?: "wav" | "flac"; waitForRetry?: (ms: number, signal: AbortSignal) => Promise<void>; onRecovery?: (event: { chunkIndex: number; action: "retry" | "split"; attempt?: number; kind: string }) => void }) {
   return {
     async run(input: { userId: string; videoId: string; runId: string; signal: AbortSignal }): Promise<void> {
       let processingStarted = false;
@@ -57,17 +58,36 @@ export function createV0AnalysisRunner(dependencies: { asr: Pick<AsrProvider, "t
 
         await dependencies.state.markChunkProcessing(input.runId, chunk.index);
         const rendered = await dependencies.media.renderChunk(run.audioPath, join(dirname(run.audioPath), `chunk-${chunk.index}.${dependencies.audioFormat ?? "flac"}`), chunk.start, chunk.end - chunk.start, input.signal);
-        const result = await transcribeWithRetry();
-        async function transcribeWithRetry() {
+        let result: TranscribeChunkResult;
+        try { result = await transcribeWithRetry(rendered.path, chunk.end - chunk.start); }
+        catch (error) {
+          // Retry accepted-but-malformed model output with smaller audio. This
+          // is bounded to one split and never applies to rejected input/auth.
+          if (!(error instanceof InvalidProviderOutputError) || chunk.end - chunk.start < 30) throw error;
+          dependencies.onRecovery?.({ chunkIndex: chunk.index, action: "split", kind: "invalid_output" });
+          const duration = chunk.end - chunk.start;
+          const segments: TranscribeChunkResult["segments"] = [];
+          for (let part = 0; part < 2; part++) {
+            await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
+            const offset = part * duration / 2;
+            const subChunk = await dependencies.media.renderChunk(run.audioPath, join(dirname(run.audioPath), `chunk-${chunk.index}-part-${part}.${dependencies.audioFormat ?? "flac"}`), chunk.start + offset, duration / 2, input.signal);
+            const transcribed = await transcribeWithRetry(subChunk.path, duration / 2);
+            segments.push(...transcribed.segments.map((segment) => ({ ...segment, start: segment.start + offset, end: segment.end + offset })));
+          }
+          result = { segments };
+        }
+        async function transcribeWithRetry(audioFile: string, durationSeconds: number) {
           for (let attempt = 1; ; attempt++) {
             await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
             try {
-              return await dependencies.asr.transcribeChunk({ audioFile: rendered.path, durationSeconds: chunk.end - chunk.start, signal: input.signal, language: null, timestampLevel: "segment" });
+              return await dependencies.asr.transcribeChunk({ audioFile, durationSeconds, signal: input.signal, language: null, timestampLevel: "segment" });
             } catch (error) {
               await assertNotCancelled(input.runId, input.signal, processingStarted, dependencies.state.isCancelling);
               const failure = classifyProviderFailure(error);
-              const decision = getRetryDecision(failure, attempt);
+              const invalidOutput = error instanceof InvalidProviderOutputError;
+              const decision = getRetryDecision(invalidOutput ? { ...failure, kind: "server_error" } : failure, attempt);
               if (!decision.retry) throw error;
+              dependencies.onRecovery?.({ chunkIndex: chunk.index, action: "retry", attempt, kind: invalidOutput ? "invalid_output" : failure.kind });
               const delayMs = Math.min(30_000, Math.max(decision.delayMs, failure.kind === "rate_limited" ? 5_000 * attempt : 0));
               const wait = dependencies.waitForRetry ?? ((ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }));
               try { await wait(delayMs, input.signal); }

@@ -19,7 +19,8 @@ type TranscriptState = {
 
 export function createV1SummaryRunner(dependencies: { summary: SummaryProvider; state: TranscriptState }) {
   return {
-    async run(input: { runId: string }) {
+    async run(input: { runId: string; signal?: AbortSignal }) {
+      input.signal?.throwIfAborted();
       await requireStageUpdate(() => dependencies.state.setStage(input.runId, "summarizing", 0.1));
       const transcript = await dependencies.state.getTranscript(input.runId);
       // Models strip the runId prefix off long segment ids and cite the suffix
@@ -36,8 +37,8 @@ export function createV1SummaryRunner(dependencies: { summary: SummaryProvider; 
       const capabilities = await dependencies.summary.capabilities();
       const plan = chooseSummaryPlan({ estimatedInputTokens: estimateTranscriptTokens(compactSegments), contextWindow: capabilities.contextWindow, segmentCount: compactSegments.length });
       const result = plan === "single"
-        ? await summarizeWithRetry(dependencies.summary, { videoDuration: compactTranscript.duration, segments: compactSegments })
-        : await summarizeMapReduce(dependencies.summary, compactTranscript);
+        ? await dependencies.summary.summarize({ videoDuration: compactTranscript.duration, segments: compactSegments, signal: input.signal })
+        : await summarizeMapReduce(dependencies.summary, compactTranscript, input.signal);
       const aligned: AlignedSummaryResult = {
         ...result,
         chapters: result.chapters.map((chapter) => ({
@@ -47,6 +48,7 @@ export function createV1SummaryRunner(dependencies: { summary: SummaryProvider; 
       };
 
       const persisted = withRealSegmentIds(aligned, byCompactId);
+      input.signal?.throwIfAborted();
       await dependencies.state.saveSummary(input.runId, persisted);
       await requireStageUpdate(() => dependencies.state.setStage(input.runId, "indexing", 0.95));
       return persisted;
@@ -65,22 +67,14 @@ function withRealSegmentIds(result: AlignedSummaryResult, byCompactId: Map<strin
   };
 }
 
-async function summarizeWithRetry(provider: SummaryProvider, input: { videoDuration: number; segments: TranscriptSegment[] }) {
-  try {
-    return await provider.summarize(input);
-  } catch (firstError) {
-    try {
-      return await provider.summarize(input);
-    } catch {
-      throw firstError;
-    }
-  }
-}
-
-async function summarizeMapReduce(provider: SummaryProvider, transcript: { duration: number; segments: TranscriptSegment[] }) {
+async function summarizeMapReduce(provider: SummaryProvider, transcript: { duration: number; segments: TranscriptSegment[] }, signal?: AbortSignal) {
   const capabilities = await provider.capabilities();
   const windows = createSummaryWindows(transcript.segments, capabilities.contextWindow);
-  const mapResults = await Promise.all(windows.map((window) => summarizeWithRetry(provider, { videoDuration: transcript.duration, segments: window.segments })));
+  const mapResults: SummaryResult[] = [];
+  for (const window of windows) {
+    signal?.throwIfAborted();
+    mapResults.push(await provider.summarize({ videoDuration: transcript.duration, segments: window.segments, signal }));
+  }
   const sourceMap = new Map<string, string[]>();
   const reductionSegments = mapResults.flatMap((result, resultIndex) => result.chapters.map((chapter, chapterIndex) => {
     const id = `map-${resultIndex}-${chapterIndex}`;
@@ -96,7 +90,7 @@ async function summarizeMapReduce(provider: SummaryProvider, transcript: { durat
   }));
   if (reductionSegments.length === 0) return mapResults[0] ?? { oneLineSummary: "", overallSummary: "", chapters: [] };
 
-  const reduced = await summarizeWithRetry(provider, { videoDuration: transcript.duration, segments: reductionSegments });
+  const reduced = await provider.summarize({ videoDuration: transcript.duration, segments: reductionSegments, signal });
   return {
     ...reduced,
     chapters: reduced.chapters.map((chapter) => ({
