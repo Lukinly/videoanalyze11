@@ -51,6 +51,8 @@
 
 ## 独立的网络限制
 
+以下记录为本次转写排查当时的状态。后续已完成服务器 Clash/Mihomo 部署，YouTube 网络探测已恢复；视频读取仍遇到平台机器人确认，详见 [服务器代理部署记录](server-clash-2026-11-07.md)。
+
 - 从服务器 Worker 直连 `https://www.youtube.com/generate_204`，10 秒内未能连接。当前服务器的 YouTube 下载能力未通过验收，需要可用的服务器独立出站网络，不能依赖个人电脑代理。
 - 从服务器以外发起公网 HTTP GET，仍返回 302 到腾讯云 `dnspod.qcloud.com/static/webblock.html`；公网 HTTPS 握手失败。服务器内部域名 HTTPS 首页为 200，与既有交接文档的备案入口拦截一致。
 - 以上问题与本次 B站转写到 55% 后因格式异常退出属于不同层次，Worker 修复不能消除云入口备案拦截或 YouTube 出站网络限制。
