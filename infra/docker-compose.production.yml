@@ -1,6 +1,7 @@
 name: videoanalyze-production
 
-# Override proxy defaults injected by the Docker client. Production connects directly.
+# Override proxy defaults injected by the Docker client. Services connect directly
+# unless api/worker explicitly opt into a server-owned outbound proxy below.
 x-direct-network: &direct-network
   HTTP_PROXY: ""
   HTTPS_PROXY: ""
@@ -13,6 +14,16 @@ x-direct-network: &direct-network
   NO_PROXY: "*"
   no_proxy: "*"
   NODE_USE_ENV_PROXY: "0"
+
+x-app-network: &app-network
+  <<: *direct-network
+  HTTP_PROXY: ${SERVER_OUTBOUND_PROXY:-}
+  HTTPS_PROXY: ${SERVER_OUTBOUND_PROXY:-}
+  http_proxy: ${SERVER_OUTBOUND_PROXY:-}
+  https_proxy: ${SERVER_OUTBOUND_PROXY:-}
+  NO_PROXY: ${SERVER_NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,storage,minio,.bilibili.com,.bilivideo.com,.bilivideo.cn,.hdslb.com,.biliapi.net,.biliapi.com,.b23.tv,.aliyuncs.com,.qianwenaiapi.com,.163.com}
+  no_proxy: ${SERVER_NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,storage,minio,.bilibili.com,.bilivideo.com,.bilivideo.cn,.hdslb.com,.biliapi.net,.biliapi.com,.b23.tv,.aliyuncs.com,.qianwenaiapi.com,.163.com}
+  NODE_USE_ENV_PROXY: "1"
 
 x-node: &node
   restart: unless-stopped
@@ -121,7 +132,7 @@ services:
     image: videoanalyze-api:${IMAGE_TAG:-local}
     build: { context: .., dockerfile: apps/api/Dockerfile }
     environment:
-      <<: [*direct-network, *database, *storage]
+      <<: [*app-network, *database, *storage]
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       S3_PUBLIC_ENDPOINT: ${STORAGE_HOST:?set STORAGE_HOST}
@@ -140,6 +151,8 @@ services:
       MAX_TOTAL_QUEUED_RUNS: ${MAX_TOTAL_QUEUED_RUNS:-20}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-2000000000}
       TEMP_MEDIA_CAPACITY_BYTES: ${TEMP_MEDIA_CAPACITY_BYTES:-40000000000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     secrets: [db_password, s3_access_key, s3_secret_key, smtp_password]
     depends_on:
       postgres: { condition: service_healthy }
@@ -159,10 +172,10 @@ services:
     build: { context: .., dockerfile: apps/worker/Dockerfile }
     image: videoanalyze-worker:${IMAGE_TAG:-local}
     environment:
-      <<: [*direct-network, *database, *storage]
-      WORKER_HTTP_PROXY: ""
-      WORKER_HTTPS_PROXY: ""
-      WORKER_NO_PROXY: "*"
+      <<: [*app-network, *database, *storage]
+      WORKER_HTTP_PROXY: ${SERVER_OUTBOUND_PROXY:-}
+      WORKER_HTTPS_PROXY: ${SERVER_OUTBOUND_PROXY:-}
+      WORKER_NO_PROXY: ${SERVER_NO_PROXY:-localhost,127.0.0.1,::1,postgres,redis,storage,minio,.bilibili.com,.bilivideo.com,.bilivideo.cn,.hdslb.com,.biliapi.net,.biliapi.com,.b23.tv,.aliyuncs.com,.qianwenaiapi.com,.163.com}
       NODE_ENV: production
       REDIS_URL: redis://redis:6379
       LLM_API_KEY_FILE: /run/secrets/llm_api_key
@@ -174,6 +187,8 @@ services:
       GLOBAL_WORKER_CONCURRENCY: ${GLOBAL_WORKER_CONCURRENCY:-2}
       FFMPEG_CONCURRENCY: ${FFMPEG_CONCURRENCY:-1}
       LONG_VIDEO_CONCURRENCY: ${LONG_VIDEO_CONCURRENCY:-1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     secrets: [db_password, s3_access_key, s3_secret_key, llm_api_key]
     depends_on:
       redis: { condition: service_healthy }

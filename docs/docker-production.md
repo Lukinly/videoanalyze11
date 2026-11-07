@@ -101,9 +101,9 @@ Garage 在私有 tmpfs 中保存权限为 0600 的 RPC 密钥副本，兼容只�
 
 ### 服务器直连，不依赖本地梯子
 
-生产 Compose 为所有服务明确清空大小写 HTTP、HTTPS、ALL、FTP 代理变量，并禁用 Node 环境代理；Worker 的专用代理变量也为空。Docker 客户端可能自动向新容器和构建注入代理，因此还需清除服务器自己的配置。这里的出站代理与 Caddy 网站反向代理不同，保留 Caddy 服务及其 80/443 端口。
+生产 Compose 默认清空大小写 HTTP、HTTPS、ALL、FTP 代理变量。API/Worker 仅在 `.env.production` 显式设置 `SERVER_OUTBOUND_PROXY` 时启用服务器自己的 HTTP 代理；其他服务维持直连。API/Worker 开启 Node 环境代理支持，但代理地址为空时仍然直连。Docker 客户端可能自动向新容器和构建注入代理，因此还需清除服务器自己的配置。这里的出站代理与 Caddy 网站反向代理不同，保留 Caddy 服务及其 80/443 端口。
 
-以下命令在 Ubuntu **服务器**执行，不在本机执行。先退出当前终端的出站代理：
+以下命令在 Ubuntu **服务器**执行，不在本机执行。要恢复完全直连，先清空 `.env.production` 中的 `SERVER_OUTBOUND_PROXY`，再退出当前终端的出站代理：
 
 ```bash
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY FTP_PROXY http_proxy https_proxy all_proxy ftp_proxy
@@ -130,6 +130,28 @@ dc exec -T api node dist/cli/mail-verify.js
 ```
 
 直连能力取决于服务器所在地区和服务商的网络可达性。清华 APT / pip 源仍然保留，它们是软件包镜像源，不连接本地梯子。Docker 客户端与服务代理配置的区别参见 [Docker 客户端代理文档](https://docs.docker.com/engine/cli/proxy/)和[守护进程代理文档](https://docs.docker.com/engine/daemon/proxy/)。
+
+### 可选：服务器独立的 Clash/Mihomo 出站代理
+
+先在服务器上安装并启动经过校验的 Mihomo 内核，将敏感订阅配置放在服务器私有目录，通过 systemd 自动启动。代理只监听本机回环与 Docker 网桥地址，管理接口只监听回环并配置随机密钥。不需要启用 TUN 或改变整机路由。
+
+在 `.env.production` 设置服务器代理，而不是个人电脑的地址：
+
+```env
+SERVER_OUTBOUND_PROXY=http://host.docker.internal:7890
+```
+
+API 和 Worker 会把 `host.docker.internal` 映射到 Docker 宿主机网关，并同时设置大小写代理变量，适配 Node、Python 下载器、curl 和 FFmpeg。默认 `NO_PROXY` 使数据库、Redis、存储、回环、B站和北京 Qwen 域名绕过代理；需要调整时使用 `SERVER_NO_PROXY`。其他容器和 Docker 守护进程不会自动使用这个应用代理。
+
+```bash
+dc config --quiet
+dc build worker
+dc up -d --no-deps --no-build --wait --wait-timeout 180 api worker
+dc exec -T worker curl -fsS -o /dev/null -w '%{http_code}\n' --connect-timeout 10 --max-time 30 https://www.youtube.com/generate_204
+dc exec -T api node -e 'fetch("http://127.0.0.1:3000/readyz").then(async r=>console.log(r.status,await r.text()))'
+```
+
+网站的 Caddy 反向代理和 ICP 备案入口与此出站代理无关。停止 Mihomo 前，应先清空 `SERVER_OUTBOUND_PROXY` 并重新创建 API/Worker，避免应用继续连接一个已停止的代理。
 
 ### B 站链接读取出现 HTTP 412
 

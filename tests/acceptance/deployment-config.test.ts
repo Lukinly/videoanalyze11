@@ -163,7 +163,7 @@ describe("credit billing deployment", () => {
     const entrypoint = new URL("../../apps/worker/docker-entrypoint.sh", import.meta.url);
     const result = spawnSync(
       "sh",
-      [entrypoint.pathname, "/bin/sh", "-c", 'printf "%s\\n" "$HTTP_PROXY" "$HTTPS_PROXY" "$NO_PROXY"'],
+      [entrypoint.pathname, "/bin/sh", "-c", 'printf "%s\\n" "$HTTP_PROXY" "$HTTPS_PROXY" "$NO_PROXY" "$http_proxy" "$https_proxy" "$no_proxy"'],
       {
         encoding: "utf8",
         env: {
@@ -177,7 +177,7 @@ describe("credit billing deployment", () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe(
-      "http://proxy.test:8080\nhttp://secure-proxy.test:8443\ninternal.test,127.0.0.1\n",
+      "http://proxy.test:8080\nhttp://secure-proxy.test:8443\ninternal.test,127.0.0.1\nhttp://proxy.test:8080\nhttp://secure-proxy.test:8443\ninternal.test,127.0.0.1\n",
     );
   });
 
@@ -185,12 +185,14 @@ describe("credit billing deployment", () => {
     const entrypoint = new URL("../../apps/worker/docker-entrypoint.sh", import.meta.url);
     const result = spawnSync(
       "sh",
-      [entrypoint.pathname, "/bin/sh", "-c", 'printf "%s\\n" "${HTTP_PROXY+set}" "${HTTPS_PROXY+set}" "$NO_PROXY"'],
+      [entrypoint.pathname, "/bin/sh", "-c", 'printf "%s\\n" "${HTTP_PROXY+set}" "${HTTPS_PROXY+set}" "$NO_PROXY" "${http_proxy+set}" "${https_proxy+set}" "$no_proxy"'],
       {
         encoding: "utf8",
         env: {
           HTTP_PROXY: "http://stale-http.test:8080",
           HTTPS_PROXY: "http://stale-https.test:8443",
+          http_proxy: "http://stale-http.test:8080",
+          https_proxy: "http://stale-https.test:8443",
           WORKER_HTTP_PROXY: "",
         },
       },
@@ -198,7 +200,7 @@ describe("credit billing deployment", () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe("\n\npostgres,redis,minio,localhost,127.0.0.1\n");
+    expect(result.stdout).toBe("\n\npostgres,redis,minio,localhost,127.0.0.1\n\n\npostgres,redis,minio,localhost,127.0.0.1\n");
   });
 
   it("configures trusted local HTTPS without using the local CA in production", () => {
