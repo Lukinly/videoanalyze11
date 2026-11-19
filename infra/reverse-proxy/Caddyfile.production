@@ -11,3 +11,7 @@
 {$STORAGE_HOST} {
   reverse_proxy {$STORAGE_UPSTREAM:minio:9000}
 }
+
+www.shiyi1314.top {
+  redir {$PUBLIC_HOST}{uri} permanent
+}
